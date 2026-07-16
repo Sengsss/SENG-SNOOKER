@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>斯诺克瞄准训练器 · Snooker Aim Trainer</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1c1915">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="瞄准训练">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+  :root{
+    --bg:#1c1915; --panel:#26221c; --panel2:#2e2921;
+    --brass:#c9a45c; --brass-dim:#8a7345;
+    --text:#e8e2d6; --muted:#9a927f;
+    --cloth:#35794B; --line:#d9d2c0;
+    --good:#7fc97f; --warn:#e0a84e; --hard:#e05c5c;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    min-height:100vh; padding:16px; display:flex; flex-direction:column; align-items:center;
+  }
+  header{width:100%; max-width:1080px; display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap;}
+  h1{font-size:20px; font-weight:600; letter-spacing:1px;}
+  h1 .en{color:var(--brass); font-weight:400; font-size:13px; letter-spacing:2px; margin-left:8px;}
+  .spec{font-size:12px; color:var(--muted); margin-left:auto;}
+  .bar{
+    width:100%; max-width:1080px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+    background:var(--panel); border:1px solid #3a342a; border-radius:10px; padding:10px 12px; margin-bottom:12px;
+  }
+  .seg{display:flex; border:1px solid var(--brass-dim); border-radius:8px; overflow:hidden;}
+  .seg button{
+    background:transparent; color:var(--muted); border:none; padding:7px 14px;
+    font-size:13px; cursor:pointer; font-family:inherit;
+  }
+  .seg button.on{background:var(--brass); color:#1c1915; font-weight:600;}
+  .btn{
+    background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px;
+    padding:7px 14px; font-size:13px; cursor:pointer; font-family:inherit;
+  }
+  .btn:hover{border-color:var(--brass-dim);}
+  .btn:active{transform:scale(0.97);}
+  select{
+    background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px;
+    padding:7px 10px; font-size:13px; font-family:inherit; cursor:pointer;
+  }
+  .hint{font-size:12px; color:var(--muted); margin-left:auto;}
+  .stage{width:100%; max-width:1080px; position:relative;}
+  #wrap2d, #wrap3d{
+    width:100%; border-radius:12px; overflow:hidden; background:#141210;
+    border:1px solid #3a342a;
+  }
+  #wrap3d{display:none; height:520px; position:relative;}
+  #view2d{width:100%; display:block; touch-action:none;}
+  .cam-btns{position:absolute; top:10px; left:10px; display:flex; gap:6px; z-index:5;}
+  .cam-btns .btn{font-size:12px; padding:5px 10px; background:rgba(28,25,21,0.85);}
+  .panel-row{
+    width:100%; max-width:1080px; display:grid; gap:10px; margin-top:12px;
+    grid-template-columns:300px 1fr;
+  }
+  .overlap-card{display:flex; flex-direction:column;}
+  .overlap-card svg{width:100%; flex:1; display:block;}
+  .ov-label{display:flex; align-items:baseline; gap:10px; margin-top:6px;}
+  .ov-label #ovFrac{font-size:24px; font-weight:700; color:var(--brass);}
+  .ov-std{font-size:12px; color:var(--muted);}
+  .stats{
+    display:grid; gap:10px; align-content:start;
+    grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  }
+  @media (max-width:760px){
+    .panel-row{grid-template-columns:1fr;}
+  }
+  .card{
+    background:var(--panel); border:1px solid #3a342a; border-radius:10px; padding:12px 14px;
+  }
+  .card .lbl{font-size:12px; color:var(--muted); margin-bottom:4px;}
+  .card .val{font-size:22px; font-weight:600; font-variant-numeric:tabular-nums;}
+  .card .val.small{font-size:16px;}
+  #diffVal.easy{color:var(--good);} #diffVal.mid{color:var(--warn);} #diffVal.hard{color:var(--hard);}
+  #potVal.easy{color:var(--good);} #potVal.mid{color:var(--warn);} #potVal.hard{color:var(--hard);}
+  footer{width:100%; max-width:1080px; margin-top:14px; font-size:12px; color:var(--muted); line-height:1.8;}
+  footer b{color:var(--brass);}
+  @media (max-width:640px){
+    .hint{display:none;}
+    .card .val{font-size:18px;}
+    #wrap3d{height:380px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>斯诺克瞄准训练器<span class="en">GHOST BALL TRAINER</span></h1>
+  <span class="spec">WPBSA 规格 · 台面 3569×1778mm · 球径 52.5mm</span>
+</header>
+
+<div class="bar">
+  <div class="seg" id="segView">
+    <button data-v="2d" class="on">2D 俯视</button>
+    <button data-v="3d">3D 球台</button>
+  </div>
+  <div class="seg" id="segMode">
+    <button data-m="free" class="on">自由摆放</button>
+    <button data-m="random">系统随机</button>
+  </div>
+  <select id="selDiff" style="display:none;">
+    <option value="any">难度：任意</option>
+    <option value="easy">难度：易 (0–25°)</option>
+    <option value="mid">难度：中 (25–50°)</option>
+    <option value="hard">难度：难 (50–80°)</option>
+  </select>
+  <button class="btn" id="btnNext" style="display:none;">换一题 ⟳</button>
+  <button class="btn" id="btnAnswer">隐藏答案 👁</button>
+  <span class="hint" id="hintText">拖动白球 / 红球 · 点击袋口选择目标袋</span>
+</div>
+
+<div class="stage">
+  <div id="wrap2d">
+    <svg id="view2d" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+  <div id="wrap3d">
+    <div class="cam-btns">
+      <button class="btn" id="btnTop">上帝视角</button>
+      <button class="btn" id="btnPlayer">击球视角</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel-row">
+  <div class="card overlap-card">
+    <div class="lbl">叠球图 · 瞄准厚度（击球视角所见）</div>
+    <svg id="ovSvg" viewBox="-170 -158 340 288"></svg>
+    <div class="ov-label"><span id="ovFrac">--</span><span id="ovStd" class="ov-std">--</span></div>
+  </div>
+  <div class="stats">
+    <div class="card"><div class="lbl">切角 Cut angle</div><div class="val" id="angVal">--</div></div>
+    <div class="card"><div class="lbl">击球厚度 Fullness</div><div class="val" id="fullVal">--</div></div>
+    <div class="card"><div class="lbl">白球行程</div><div class="val small" id="cueDistVal">--</div></div>
+    <div class="card"><div class="lbl">红球行程</div><div class="val small" id="objDistVal">--</div></div>
+    <div class="card"><div class="lbl">难度评估</div><div class="val" id="diffVal">--</div></div>
+    <div class="card"><div class="lbl">切球方向</div><div class="val small" id="sideVal">--</div></div>
+    <div class="card"><div class="lbl">进袋判定</div><div class="val" id="potVal">--</div></div>
+  </div>
+</div>
+
+<footer>
+  <b>训练方法</b>：点「隐藏答案」→ 目测假想球位置和出杆线 → 点「显示答案」对照。
+  白色虚线圆 = 假想球（瞄准点），金色虚线 = 红球进袋线，蓝色虚线 = 出杆线。<br>
+  <b>叠球图</b>：红球按 1/8 等分刻度划分，金色高亮 = 白球覆盖面积，下方刻度尺直接读出覆盖量（如 5/8）。满球 0° · 3/4 球 14.5° · 1/2 球 30° · 1/4 球 48.6°（厚度 = 1 − sin 切角）。
+  3D 击球视角模拟趴下瞄准时约 28cm 的视线高度——注意同一切角在俯视和低视角下的巨大差异。
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+/* PWA：注册 service worker 以支持离线访问和添加到主屏幕 */
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    try{ navigator.serviceWorker.register('sw.js'); }catch(e){}
+  });
+}
+/* ================= 真实规格（毫米） ================= */
+const L = 3569, W = 1778;          // 台面（cushion face 之间）
+const R = 26.25;                    // 球半径 52.5mm
+const CORNER_R = 43, MID_R = 52;    // 角袋≈86mm 中袋≈104mm（近似 WPBSA 模板）
+const BAULK = 737;                  // baulk line 距底库
+const D_R = 292;                    // D 区半径
+const CUSHION = 95;                 // 库边视觉宽度
+
+/* 袋口位置：x ∈ [-L/2, L/2]（baulk 在左），y ∈ [-W/2, W/2] */
+const POCKETS = [
+  {x:-L/2, y:-W/2, r:CORNER_R, name:'底左角袋'},
+  {x: 0,   y:-W/2, r:MID_R,    name:'上中袋'},
+  {x: L/2, y:-W/2, r:CORNER_R, name:'顶左角袋'},
+  {x:-L/2, y: W/2, r:CORNER_R, name:'底右角袋'},
+  {x: 0,   y: W/2, r:MID_R,    name:'下中袋'},
+  {x: L/2, y: W/2, r:CORNER_R, name:'顶右角袋'},
+];
+
+/* 袋口鼻（jaw nose）几何：每个袋口两侧库边末端的圆角落点。
+   角袋：鼻点分别落在两条库边上，距真实台角 s = CORNER_R*√2，
+   使两鼻间直线距离 = 2*CORNER_R ≈ 86mm；中袋：鼻点在同一条库边上，
+   距袋口中心 ±MID_R，两鼻间距 = 2*MID_R ≈ 104mm。2D / 3D 共用此结构。 */
+const NOSE_R = 12; // 袋口鼻圆角半径（10-13mm 规格区间取中值）
+function pocketNoses(){
+  return POCKETS.map(p=>{
+    if (p.r === CORNER_R){
+      const sx = Math.sign(p.x), sy = Math.sign(p.y), s = p.r*Math.SQRT2;
+      return { corner:true, h:{x:p.x-sx*s, y:p.y}, v:{x:p.x, y:p.y-sy*s} };
+    }
+    return { corner:false, l:{x:-p.r, y:p.y}, r:{x:p.r, y:p.y} };
+  });
+}
+const NOSES = pocketNoses();
+/* 6 段独立库边（2 短库 + 4 条长库半段），每段两端为袋口鼻点 */
+const CUSHIONS = [
+  {side:'y', y:-W/2, x1:NOSES[0].h.x, x2:NOSES[1].l.x, sign:-1},
+  {side:'y', y:-W/2, x1:NOSES[1].r.x, x2:NOSES[2].h.x, sign:-1},
+  {side:'y', y: W/2, x1:NOSES[3].h.x, x2:NOSES[4].l.x, sign: 1},
+  {side:'y', y: W/2, x1:NOSES[4].r.x, x2:NOSES[5].h.x, sign: 1},
+  {side:'x', x:-L/2, y1:NOSES[0].v.y, y2:NOSES[3].v.y, sign:-1},
+  {side:'x', x: L/2, y1:NOSES[2].v.y, y2:NOSES[5].v.y, sign: 1},
+];
+
+/* 置球点 */
+const SPOTS = [
+  {x:-L/2+BAULK, y:-D_R, c:'#2f9e44'},          // 绿
+  {x:-L/2+BAULK, y:0,    c:'#8a5a2b'},          // 棕
+  {x:-L/2+BAULK, y: D_R, c:'#e6c229'},          // 黄
+  {x:0,          y:0,    c:'#2b6cb0'},          // 蓝
+  {x:L/4,        y:0,    c:'#e07a9a'},          // 粉
+  {x:L/2-324,    y:0,    c:'#222'},             // 黑
+];
+
+/* ================= 状态 ================= */
+const S = {
+  cue: {x:-L/2+BAULK-200, y:150},
+  obj: {x:600, y:-200},
+  pk: 5,
+  showAnswer: true,
+  mode: 'free',
+  view: '2d',
+};
+
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
+
+function ghostPos(){
+  const p = POCKETS[S.pk], o = S.obj;
+  const dx = o.x-p.x, dy = o.y-p.y;
+  const d = Math.hypot(dx,dy)||1;
+  return {x:o.x+dx/d*2*R, y:o.y+dy/d*2*R};
+}
+function cutAngle(){
+  const g = ghostPos(), p = POCKETS[S.pk];
+  const v1x=g.x-S.cue.x, v1y=g.y-S.cue.y;
+  const v2x=p.x-S.obj.x, v2y=p.y-S.obj.y;
+  const m1=Math.hypot(v1x,v1y), m2=Math.hypot(v2x,v2y);
+  const cos = clamp((v1x*v2x+v1y*v2y)/((m1*m2)||1), -1, 1);
+  return Math.acos(cos)*180/Math.PI;
+}
+
+/* 进袋判定：目标球（半径 R）沿进袋线飞向袋口，若其路径与某只袋口鼻
+   （半径 NOSE_R）的间距小于 R+NOSE_R 就会撞上。撞鼻按圆弧反弹简化为
+   镜面反射：以撞击点处「鼻心→球心」方向为法线做一次反射，再看反射后
+   的方向是否仍能绕过另一只鼻钻进袋口——绕得过算「擦库鼻但仍进」，
+   绕不过或被弹回台面算「撞鼻弹出」。 */
+function findNoseHit(origin, dir, distMax, noseList){
+  const keep = R + NOSE_R;
+  let best = null;
+  for (const n of noseList){
+    const ox = n.x-origin.x, oy = n.y-origin.y;
+    const proj = ox*dir.x + oy*dir.y;
+    if (proj<=0 || proj>=distMax) continue;
+    const perpX = ox-proj*dir.x, perpY = oy-proj*dir.y;
+    const d = Math.hypot(perpX,perpY);
+    if (d >= keep) continue;
+    const back = Math.sqrt(Math.max(0, keep*keep - d*d));
+    const t = proj - back;
+    if (t>0 && t<distMax && (!best || t<best.t)){
+      const cx = origin.x+dir.x*t, cy = origin.y+dir.y*t;
+      best = { nose:n, t, pos:{x:cx,y:cy}, normal:{x:(cx-n.x)/keep, y:(cy-n.y)/keep} };
+    }
+  }
+  return best;
+}
+function potJudge(){
+  const p = POCKETS[S.pk], nose = NOSES[S.pk];
+  const noseList = nose.corner ? [nose.h, nose.v] : [nose.l, nose.r];
+  const o = S.obj;
+  const distFull = dist(o,p)||1;
+  const dir = {x:(p.x-o.x)/distFull, y:(p.y-o.y)/distFull};
+  const hit1 = findNoseHit(o, dir, distFull, noseList);
+  if (!hit1) return {status:'clear'};
+  const nrm = hit1.normal;
+  const dot = dir.x*nrm.x + dir.y*nrm.y;
+  const rdir = {x:dir.x-2*dot*nrm.x, y:dir.y-2*dot*nrm.y};
+  const progress = rdir.x*dir.x + rdir.y*dir.y;
+  const remaining = noseList.filter(n=>n!==hit1.nose);
+  const hit2 = findNoseHit(hit1.pos, rdir, 200, remaining);
+  if (progress > 0.2 && !hit2) return {status:'rattle', nose:hit1.nose, pos:hit1.pos, dir:rdir};
+  return {status:'out', nose:hit1.nose, pos:hit1.pos, dir:rdir};
+}
+
+/* ================= 2D (SVG) ================= */
+const NS='http://www.w3.org/2000/svg';
+const svg = document.getElementById('view2d');
+const M = CUSHION+40;
+svg.setAttribute('viewBox', `${-L/2-M} ${-W/2-M} ${L+2*M} ${W+2*M}`);
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent||svg).appendChild(e);
+  return e;
+}
+/* 木框 + 台呢 */
+el('rect',{x:-L/2-CUSHION-30, y:-W/2-CUSHION-30, width:L+2*CUSHION+60, height:W+2*CUSHION+60, rx:34, fill:'#4a3421'});
+el('rect',{x:-L/2, y:-W/2, width:L, height:W, fill:'#35794B'});
+/* 库边：6 段独立矩形，端头圆角 = 袋口鼻，袋口处露出木框缺口 */
+CUSHIONS.forEach(seg=>{
+  if (seg.side==='y'){
+    const rx0 = Math.min(seg.x1,seg.x2), w = Math.abs(seg.x2-seg.x1);
+    const ry0 = seg.sign>0 ? seg.y : seg.y-CUSHION;
+    el('rect',{x:rx0, y:ry0, width:w, height:CUSHION, rx:NOSE_R, ry:NOSE_R, fill:'#2a5f3c'});
+  } else {
+    const ry0 = Math.min(seg.y1,seg.y2), h = Math.abs(seg.y2-seg.y1);
+    const rx0 = seg.sign>0 ? seg.x : seg.x-CUSHION;
+    el('rect',{x:rx0, y:ry0, width:CUSHION, height:h, rx:NOSE_R, ry:NOSE_R, fill:'#2a5f3c'});
+  }
+});
+/* baulk line + D */
+el('line',{x1:-L/2+BAULK, y1:-W/2, x2:-L/2+BAULK, y2:W/2, stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
+el('path',{d:`M ${-L/2+BAULK} ${-D_R} A ${D_R} ${D_R} 0 0 0 ${-L/2+BAULK} ${D_R}`, fill:'none', stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
+SPOTS.forEach(s=> el('circle',{cx:s.x, cy:s.y, r:9, fill:'#d9d2c0', opacity:0.85}));
+/* 袋口 */
+const pkEls = POCKETS.map((p,i)=>{
+  const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
+  el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r+14, fill:'#0d0b09'});
+  const hole = el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r, fill:'#000', style:'cursor:pointer'});
+  const ring = el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r+22, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
+  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); S.pk=i; update(); });
+  return ring;
+});
+/* 瞄准线 + 假想球（答案层） */
+const gAns = el('g',{});
+const lnOP = el('line',{stroke:'#c9a45c','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
+const lnCG = el('line',{stroke:'#7ab8f5','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
+const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'stroke-dasharray':'12 10'}, gAns);
+/* 撞鼻反弹可视化：只在会撞鼻时出现 */
+const gBounce = el('g',{opacity:0}, gAns);
+const bounceNoseRing = el('circle',{r:NOSE_R+6, fill:'none', stroke:'#e05c5c','stroke-width':3}, gBounce);
+const bounceHit = el('circle',{r:6, fill:'#e05c5c'}, gBounce);
+const bounceLine = el('line',{stroke:'#e05c5c','stroke-width':4,'stroke-dasharray':'6 6'}, gBounce);
+/* 球（含放大的触摸热区） */
+function makeBall(fill, stroke){
+  const g = el('g',{style:'cursor:grab'});
+  el('circle',{r:R, fill:fill, stroke:stroke,'stroke-width':2}, g);
+  el('circle',{r:R*0.35, cx:-R*0.28, cy:-R*0.28, fill:'#fff', opacity:0.35}, g);
+  el('circle',{r:70, fill:'transparent'}, g);
+  return g;
+}
+const bObj = makeBall('#c8342b','#7a1712');
+const bCue = makeBall('#f3eee0','#b8b09a');
+
+function svgPoint(evt){
+  const p = svg.createSVGPoint();
+  p.x=evt.clientX; p.y=evt.clientY;
+  return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+let drag2d=null;
+svg.addEventListener('pointerdown', e=>{
+  if (S.mode!=='free') return;
+  const p = svgPoint(e);
+  if (dist(p,S.cue)<80) drag2d='cue';
+  else if (dist(p,S.obj)<80) drag2d='obj';
+  if (drag2d){ svg.setPointerCapture(e.pointerId); e.preventDefault(); }
+});
+svg.addEventListener('pointermove', e=>{
+  if (!drag2d) return;
+  const p = svgPoint(e);
+  const b = S[drag2d];
+  b.x = clamp(p.x, -L/2+R, L/2-R);
+  b.y = clamp(p.y, -W/2+R, W/2-R);
+  /* 防止两球重叠 */
+  const other = drag2d==='cue'?S.obj:S.cue;
+  if (dist(b,other) < 2*R+2){
+    const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
+    b.x = other.x + dx/d*(2*R+2);
+    b.y = other.y + dy/d*(2*R+2);
+  }
+  update();
+  e.preventDefault();
+});
+svg.addEventListener('pointerup', ()=>{ drag2d=null; });
+
+/* ================= 3D (three.js) ================= */
+const wrap3d = document.getElementById('wrap3d');
+const MM = 0.001;
+let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
+let bounceRing3, bounceLine3;
+let camPos, camLook, tPos, tLook, camMode='top';
+
+function init3d(){
+  if (ready3) return;
+  ready3 = true;
+  scene3 = new THREE.Scene();
+  scene3.background = new THREE.Color(0x1c1915);
+  cam3 = new THREE.PerspectiveCamera(50, wrap3d.clientWidth/wrap3d.clientHeight, 0.01, 50);
+  renderer3 = new THREE.WebGLRenderer({antialias:true});
+  renderer3.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
+  renderer3.domElement.style.touchAction='none';
+  wrap3d.appendChild(renderer3.domElement);
+
+  scene3.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const key = new THREE.DirectionalLight(0xfff4dd, 0.85);
+  key.position.set(0.5, 3, 1);
+  scene3.add(key);
+
+  const Lm=L*MM, Wm=W*MM, Rm=R*MM;
+  /* 台呢 */
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(Lm, Wm), new THREE.MeshLambertMaterial({color:0x35794B}));
+  cloth.rotation.x=-Math.PI/2;
+  scene3.add(cloth);
+  /* 库边 + 木框 */
+  const railM = new THREE.MeshLambertMaterial({color:0x4a3421});
+  const cushM = new THREE.MeshLambertMaterial({color:0x2a5f3c});
+  function bar(mat,w,h,d,x,y,z){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    m.position.set(x,y,z); scene3.add(m);
+  }
+  const cw=CUSHION*MM;
+  /* 库边：6 段独立几何 + 袋口鼻圆柱（半径 NOSE_R，代替尖角） */
+  CUSHIONS.forEach(seg=>{
+    if (seg.side==='y'){
+      const w = Math.abs(seg.x2-seg.x1)*MM, cz = (seg.sign>0? seg.y+CUSHION/2 : seg.y-CUSHION/2)*MM;
+      bar(cushM, w, 0.045, cw, (seg.x1+seg.x2)/2*MM, 0.0225, cz);
+      [seg.x1, seg.x2].forEach(nx=>{
+        const nose = new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
+        nose.position.set(nx*MM, 0.0225, seg.y*MM);
+        scene3.add(nose);
+      });
+    } else {
+      const d = Math.abs(seg.y2-seg.y1)*MM, cx = (seg.sign>0? seg.x+CUSHION/2 : seg.x-CUSHION/2)*MM;
+      bar(cushM, cw, 0.045, d, cx, 0.0225, (seg.y1+seg.y2)/2*MM);
+      [seg.y1, seg.y2].forEach(ny=>{
+        const nose = new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
+        nose.position.set(seg.x*MM, 0.0225, ny*MM);
+        scene3.add(nose);
+      });
+    }
+  });
+  bar(railM, Lm+2*cw+0.12, 0.05, 0.06, 0, 0.025,  Wm/2+cw+0.03);
+  bar(railM, Lm+2*cw+0.12, 0.05, 0.06, 0, 0.025, -Wm/2-cw-0.03);
+  bar(railM, 0.06, 0.05, Wm+2*cw,  Lm/2+cw+0.03, 0.025, 0);
+  bar(railM, 0.06, 0.05, Wm+2*cw, -Lm/2-cw-0.03, 0.025, 0);
+  /* baulk + D + 置球点 */
+  const lineM = new THREE.MeshBasicMaterial({color:0xd9d2c0, transparent:true, opacity:0.7});
+  const bl = new THREE.Mesh(new THREE.PlaneGeometry(0.004, Wm), lineM);
+  bl.rotation.x=-Math.PI/2;
+  bl.position.set(-Lm/2+BAULK*MM, 0.001, 0);
+  scene3.add(bl);
+  const dGeo = new THREE.RingGeometry(D_R*MM-0.002, D_R*MM+0.002, 48, 1, Math.PI/2, Math.PI);
+  const dRing = new THREE.Mesh(dGeo, lineM);
+  dRing.rotation.x=-Math.PI/2;
+  dRing.position.set(-Lm/2+BAULK*MM, 0.001, 0);
+  scene3.add(dRing);
+  SPOTS.forEach(s=>{
+    const d=new THREE.Mesh(new THREE.CircleGeometry(0.009,16), new THREE.MeshBasicMaterial({color:0xd9d2c0}));
+    d.rotation.x=-Math.PI/2;
+    d.position.set(s.x*MM, 0.0012, s.y*MM);
+    scene3.add(d);
+  });
+  /* 袋口 */
+  POCKETS.forEach(p=>{
+    const c=new THREE.Mesh(new THREE.CylinderGeometry(p.r*MM, p.r*MM, 0.004, 24), new THREE.MeshBasicMaterial({color:0x050505}));
+    const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
+    c.position.set((p.x+ox)*MM, 0.002, (p.y+oy)*MM);
+    scene3.add(c);
+  });
+  ball3.target = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.007, 8, 32), new THREE.MeshBasicMaterial({color:0xc9a45c}));
+  ball3.target.rotation.x=-Math.PI/2;
+  scene3.add(ball3.target);
+  /* 球 */
+  function mkBall(color){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(Rm,24,16), new THREE.MeshLambertMaterial({color:color}));
+    m.position.y=Rm; scene3.add(m); return m;
+  }
+  ball3.cue = mkBall(0xf3eee0);
+  ball3.obj = mkBall(0xc8342b);
+  ghost3 = new THREE.Mesh(new THREE.SphereGeometry(Rm,16,12), new THREE.MeshBasicMaterial({color:0xffffff, wireframe:true, transparent:true, opacity:0.7}));
+  scene3.add(ghost3);
+  function dash(color){
+    const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+    const l=new THREE.Line(g,new THREE.LineDashedMaterial({color:color,dashSize:0.05,gapSize:0.04}));
+    scene3.add(l); return l;
+  }
+  lnOP3 = dash(0xc9a45c);
+  lnCG3 = dash(0x7ab8f5);
+  /* 撞鼻反弹可视化（3D） */
+  bounceRing3 = new THREE.Mesh(new THREE.RingGeometry(NOSE_R*MM, (NOSE_R+5)*MM, 24), new THREE.MeshBasicMaterial({color:0xe05c5c, side:THREE.DoubleSide}));
+  bounceRing3.rotation.x=-Math.PI/2;
+  scene3.add(bounceRing3);
+  bounceLine3 = dash(0xe05c5c);
+
+  camPos=new THREE.Vector3(0,3.6,0.02); camLook=new THREE.Vector3(0,0,0);
+  tPos=camPos.clone(); tLook=camLook.clone();
+
+  /* 3D 拖球（上帝视角 + 自由模式） */
+  const ray=new THREE.Raycaster(), mv=new THREE.Vector2();
+  const plane=new THREE.Plane(new THREE.Vector3(0,1,0), -Rm);
+  let drag3=null;
+  function setRay(e){
+    const r=renderer3.domElement.getBoundingClientRect();
+    mv.x=((e.clientX-r.left)/r.width)*2-1;
+    mv.y=-((e.clientY-r.top)/r.height)*2+1;
+    ray.setFromCamera(mv,cam3);
+  }
+  renderer3.domElement.addEventListener('pointerdown',e=>{
+    if (camMode!=='top'||S.mode!=='free') return;
+    setRay(e);
+    const hit=new THREE.Vector3();
+    if(!ray.ray.intersectPlane(plane,hit)) return;
+    const pm={x:hit.x/MM, y:hit.z/MM};
+    if (dist(pm,S.cue)<90) drag3='cue';
+    else if (dist(pm,S.obj)<90) drag3='obj';
+    if(drag3) e.preventDefault();
+  });
+  renderer3.domElement.addEventListener('pointermove',e=>{
+    if(!drag3) return;
+    setRay(e);
+    const hit=new THREE.Vector3();
+    if(!ray.ray.intersectPlane(plane,hit)) return;
+    const b=S[drag3];
+    b.x=clamp(hit.x/MM,-L/2+R,L/2-R);
+    b.y=clamp(hit.z/MM,-W/2+R,W/2-R);
+    const other = drag3==='cue'?S.obj:S.cue;
+    if (dist(b,other)<2*R+2){
+      const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
+      b.x=other.x+dx/d*(2*R+2); b.y=other.y+dy/d*(2*R+2);
+    }
+    update();
+    e.preventDefault();
+  });
+  window.addEventListener('pointerup',()=>{drag3=null;});
+
+  (function loop(){
+    requestAnimationFrame(loop);
+    camPos.lerp(tPos,0.08); camLook.lerp(tLook,0.08);
+    cam3.position.copy(camPos); cam3.lookAt(camLook);
+    renderer3.render(scene3,cam3);
+  })();
+
+  window.addEventListener('resize', resize3d);
+}
+function resize3d(){
+  if(!ready3) return;
+  cam3.aspect=wrap3d.clientWidth/wrap3d.clientHeight;
+  cam3.updateProjectionMatrix();
+  renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
+}
+function goTop(){
+  camMode='top';
+  tPos.set(0,3.6,0.02); tLook.set(0,0,0);
+  hint('上帝视角：自由模式下可拖动球');
+}
+function goPlayer(){
+  camMode='player';
+  const g=ghostPos();
+  const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM);
+  const gv=new THREE.Vector3(g.x*MM, R*MM, g.y*MM);
+  const back=c.clone().sub(gv).setY(0).normalize();
+  tPos=c.clone().add(back.multiplyScalar(0.5)); tPos.y=0.28;
+  tLook=gv.clone();
+  hint('击球视角：模拟趴下瞄准的视线高度');
+}
+
+/* ================= 随机出题 ================= */
+const BANDS = {any:[0,80], easy:[0,25], mid:[25,50], hard:[50,80]};
+function randomLayout(){
+  const band = BANDS[document.getElementById('selDiff').value];
+  for (let i=0;i<400;i++){
+    S.pk = Math.floor(Math.random()*6);
+    S.obj = {x:(Math.random()-0.5)*(L-6*R), y:(Math.random()-0.5)*(W-6*R)};
+    S.cue = {x:(Math.random()-0.5)*(L-6*R), y:(Math.random()-0.5)*(W-6*R)};
+    if (dist(S.cue,S.obj) < 8*R) continue;
+    if (dist(S.obj, POCKETS[S.pk]) < 300) continue;
+    const g = ghostPos();
+    if (Math.abs(g.x)>L/2-R || Math.abs(g.y)>W/2-R) continue;
+    const a = cutAngle();
+    if (a>=band[0] && a<=band[1]) break;
+  }
+  update();
+  if (camMode==='player') goPlayer();
+}
+
+/* ================= 叠球图（分数瞄准法） ================= */
+const OV = document.getElementById('ovSvg');
+const Rd = 62;               // 叠球图中的球半径（像素）
+const BALL_Y = -55;          // 两球圆心高度
+function ovEl(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent||OV).appendChild(e);
+  return e;
+}
+/* 箭头 marker */
+const ovDefs = ovEl('defs',{});
+const mk = ovEl('marker',{id:'ovArrow', viewBox:'0 0 10 10', refX:8, refY:5,
+  markerWidth:7, markerHeight:7, orient:'auto-start-reverse'}, ovDefs);
+ovEl('path',{d:'M 0 0 L 10 5 L 0 10 z', fill:'#e05c5c'}, mk);
+const mkW = ovEl('marker',{id:'ovArrowW', viewBox:'0 0 10 10', refX:8, refY:5,
+  markerWidth:8, markerHeight:8, orient:'auto-start-reverse'}, ovDefs);
+ovEl('path',{d:'M 0 0 L 10 5 L 0 10 z', fill:'#e8e2d6'}, mkW);
+/* 红球（目标球）+ 八分之一等分虚线 */
+const ovObjG = ovEl('g',{});
+const ovClip = ovEl('clipPath',{id:'ovClip'}, ovDefs);
+const ovClipC = ovEl('circle',{cx:0, cy:BALL_Y, r:Rd}, ovClip);
+ovEl('circle',{cx:0, cy:BALL_Y, r:Rd, fill:'#c8342b', stroke:'#7a1712', 'stroke-width':2}, ovObjG);
+const OV_FRACS = [-0.75,-0.5,-0.25,0,0.25,0.5,0.75];   // 7 条线 → 8 等分
+const ovQLines = OV_FRACS.map(f =>{
+  const major = (f*2)%1===0;   // -0.5 / 0 / 0.5 是四分线，画粗一点
+  return ovEl('line',{y1:BALL_Y-Rd, y2:BALL_Y+Rd, stroke:'#fff',
+    'stroke-width': major?1.8:1, 'stroke-dasharray': major?'6 5':'3 5',
+    opacity: major?0.6:0.32, 'clip-path':'url(#ovClip)'}, ovObjG);
+});
+/* 覆盖面积高亮：白球与红球的交叠透镜区 */
+const ovLens = ovEl('circle',{cx:0, cy:BALL_Y, r:Rd, fill:'#c9a45c', opacity:0.32,
+  'clip-path':'url(#ovClip)'});
+/* 红球出球方向（红色虚线箭头） */
+const ovDep = ovEl('line',{stroke:'#e05c5c','stroke-width':3,'stroke-dasharray':'8 6',
+  'marker-end':'url(#ovArrow)'});
+/* 白球（假想球位置）：半透明填充 + 轮廓 */
+const ovCueG = ovEl('g',{});
+ovEl('circle',{cx:0, cy:BALL_Y, r:Rd, fill:'#f3eee0', opacity:0.28}, ovCueG);
+ovEl('circle',{cx:0, cy:BALL_Y, r:Rd, fill:'none', stroke:'#f3eee0','stroke-width':3,
+  'stroke-dasharray':'10 7'}, ovCueG);
+ovEl('circle',{cx:0, cy:BALL_Y, r:4, fill:'#e05c5c'}, ovCueG);
+/* 出杆方向：垂直红线 + 白色箭头 */
+ovEl('line',{x1:0, y1:120, x2:0, y2:BALL_Y, stroke:'#e05c5c','stroke-width':2, opacity:0.85});
+ovEl('line',{x1:0, y1:118, x2:0, y2:74, stroke:'#e8e2d6','stroke-width':5,
+  'marker-end':'url(#ovArrowW)'});
+/* 切角弧线标注 */
+const ovArc = ovEl('path',{fill:'none', stroke:'#e8e2d6','stroke-width':1.5, opacity:0.7});
+const ovArcTxt = ovEl('text',{fill:'#e8e2d6','font-size':15,'font-weight':600,
+  'text-anchor':'middle'});
+/* 1/8 刻度尺（在红球正下方） */
+const RULER_Y = 26;
+const ovRulerG = ovEl('g',{});
+const ovRulerBg = ovEl('rect',{y:RULER_Y, height:10, fill:'#3a342a', rx:2}, ovRulerG);
+const ovRulerFill = ovEl('rect',{y:RULER_Y, height:10, fill:'#c9a45c', rx:2}, ovRulerG);
+const ovTicks = [];
+for (let i=0;i<=8;i++){
+  const major = i%2===0;
+  ovTicks.push(ovEl('line',{
+    y1: major?RULER_Y-5:RULER_Y-2, y2: major?RULER_Y+15:RULER_Y+12,
+    stroke:'#9a927f', 'stroke-width': major?1.6:1, opacity: major?0.9:0.5}, ovRulerG));
+}
+const ovRulerTxt = ovEl('text',{y:RULER_Y+32, fill:'#c9a45c','font-size':14,
+  'font-weight':700,'text-anchor':'middle'}, ovRulerG);
+
+const STD_FRACS = [
+  [1.00,'满球 0°'], [0.875,'7/8 球'], [0.75,'3/4 球 14.5°'], [0.625,'5/8 球'],
+  [0.50,'1/2 球 30°'], [0.375,'3/8 球'], [0.25,'1/4 球 48.6°'], [0.125,'1/8 球'],
+  [0,'极限薄球 90°'],
+];
+function fracName(f){
+  let best = STD_FRACS[0];
+  for (const s of STD_FRACS) if (Math.abs(s[0]-f) < Math.abs(best[0]-f)) best = s;
+  return best[1];
+}
+function updateOverlap(aDeg, sideSign){
+  const rad = Math.min(aDeg, 90)*Math.PI/180;
+  const sin = Math.sin(rad), cos = Math.cos(rad);
+  const f = Math.max(0, 1 - sin);
+  const dx = sideSign * 2 * Rd * sin;   // 红球相对瞄准线的横向偏移
+  ovObjG.setAttribute('transform', `translate(${dx},0)`);
+  ovClipC.setAttribute('cx', dx);
+  ovQLines.forEach((l, i)=>{
+    const off = OV_FRACS[i]*Rd;
+    l.setAttribute('x1', dx+off); l.setAttribute('x2', dx+off);
+  });
+  /* 1/8 刻度尺：覆盖侧 = 白球所在的一侧（切向的反侧） */
+  const left = dx - Rd, wFull = 2*Rd, wCov = f*wFull;
+  ovRulerBg.setAttribute('x', left); ovRulerBg.setAttribute('width', wFull);
+  ovRulerFill.setAttribute('width', Math.max(0,wCov));
+  ovRulerFill.setAttribute('x', sideSign>0 ? left : dx+Rd-wCov);
+  ovTicks.forEach((t,i)=>{
+    const x = left + i*wFull/8;
+    t.setAttribute('x1', x); t.setAttribute('x2', x);
+  });
+  const eighth = f*8;
+  ovRulerTxt.setAttribute('x', dx);
+  ovRulerTxt.textContent = (Math.abs(eighth-Math.round(eighth))<0.06
+    ? Math.round(eighth) : eighth.toFixed(1)) + '/8 覆盖';
+  /* 红球出球方向 = 朝袋口，与瞄准线成切角 */
+  const len = 92;
+  ovDep.setAttribute('x1', dx); ovDep.setAttribute('y1', BALL_Y);
+  ovDep.setAttribute('x2', dx + sideSign*sin*len);
+  ovDep.setAttribute('y2', BALL_Y - cos*len);
+  /* 弧线标注切角 */
+  if (aDeg > 4){
+    const r0 = 46, a1 = -Math.PI/2, a2 = -Math.PI/2 + sideSign*rad;
+    const x1 = dx + r0*Math.cos(a1), y1 = BALL_Y + r0*Math.sin(a1);
+    const x2 = dx + r0*Math.cos(a2), y2 = BALL_Y + r0*Math.sin(a2);
+    ovArc.setAttribute('d', `M ${x1} ${y1} A ${r0} ${r0} 0 0 ${sideSign>0?1:0} ${x2} ${y2}`);
+    ovArc.setAttribute('opacity', 0.7);
+    const am = -Math.PI/2 + sideSign*rad/2;
+    ovArcTxt.setAttribute('x', dx + 74*Math.cos(am));
+    ovArcTxt.setAttribute('y', BALL_Y + 74*Math.sin(am));
+    ovArcTxt.textContent = aDeg.toFixed(1)+'°';
+  } else {
+    ovArc.setAttribute('opacity', 0);
+    ovArcTxt.textContent = '';
+  }
+  document.getElementById('ovFrac').textContent =
+    f >= 0.98 ? '满球' : (f*100).toFixed(0)+'% 厚度';
+  document.getElementById('ovStd').textContent = '≈ ' + fracName(f);
+  return f;
+}
+
+/* ================= 统一刷新 ================= */
+function hint(t){ document.getElementById('hintText').textContent=t; }
+
+function update(){
+  const g = ghostPos(), p = POCKETS[S.pk];
+  const a = cutAngle();
+  /* 分数瞄准法：厚度 = 1 - sin(切角)。1/2球=30°，3/4球=14.5°，1/4球=48.6° */
+  const full = Math.max(0, 1 - Math.sin(Math.min(a,90)*Math.PI/180))*100;
+  const dCue = dist(S.cue, g), dObj = dist(S.obj, p);
+  /* 切球方向：袋口在瞄准线的哪一侧（SVG 坐标 y 向下，cross>0 = 右侧） */
+  const ux = g.x-S.cue.x, uy = g.y-S.cue.y;
+  const cross = ux*(p.y-S.cue.y) - uy*(p.x-S.cue.x);
+  const sideSign = cross > 0 ? 1 : -1;
+  const pj = potJudge();
+  const potColor = pj.status==='clear' ? 0xc9a45c : (pj.status==='rattle' ? 0xe0a84e : 0xe05c5c);
+  const potColorCss = '#'+potColor.toString(16).padStart(6,'0');
+
+  /* 2D */
+  bCue.setAttribute('transform',`translate(${S.cue.x},${S.cue.y})`);
+  bObj.setAttribute('transform',`translate(${S.obj.x},${S.obj.y})`);
+  cGhost.setAttribute('cx',g.x); cGhost.setAttribute('cy',g.y);
+  lnOP.setAttribute('x1',S.obj.x); lnOP.setAttribute('y1',S.obj.y);
+  lnOP.setAttribute('x2',p.x); lnOP.setAttribute('y2',p.y);
+  lnOP.setAttribute('stroke', potColorCss);
+  lnCG.setAttribute('x1',S.cue.x); lnCG.setAttribute('y1',S.cue.y);
+  lnCG.setAttribute('x2',g.x); lnCG.setAttribute('y2',g.y);
+  gAns.setAttribute('opacity', S.showAnswer?1:0);
+  pkEls.forEach((r,i)=> r.setAttribute('opacity', i===S.pk?1:0));
+  if (pj.status==='clear'){
+    gBounce.setAttribute('opacity',0);
+  } else {
+    gBounce.setAttribute('opacity',1);
+    bounceNoseRing.setAttribute('cx', pj.nose.x); bounceNoseRing.setAttribute('cy', pj.nose.y);
+    bounceHit.setAttribute('cx', pj.pos.x); bounceHit.setAttribute('cy', pj.pos.y);
+    bounceLine.setAttribute('x1', pj.pos.x); bounceLine.setAttribute('y1', pj.pos.y);
+    bounceLine.setAttribute('x2', pj.pos.x+pj.dir.x*140); bounceLine.setAttribute('y2', pj.pos.y+pj.dir.y*140);
+  }
+
+  /* 3D */
+  if (ready3){
+    ball3.cue.position.set(S.cue.x*MM, R*MM, S.cue.y*MM);
+    ball3.obj.position.set(S.obj.x*MM, R*MM, S.obj.y*MM);
+    ghost3.position.set(g.x*MM, R*MM, g.y*MM);
+    const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
+    ball3.target.position.set((p.x+ox)*MM, 0.004, (p.y+oy)*MM);
+    lnOP3.geometry.setFromPoints([
+      new THREE.Vector3(S.obj.x*MM, R*MM, S.obj.y*MM),
+      new THREE.Vector3(p.x*MM, R*MM, p.y*MM)]);
+    lnOP3.computeLineDistances();
+    lnOP3.material.color.set(potColor);
+    lnCG3.geometry.setFromPoints([
+      new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM),
+      new THREE.Vector3(g.x*MM, R*MM, g.y*MM)]);
+    lnCG3.computeLineDistances();
+    ghost3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
+    const showBounce = S.showAnswer && pj.status!=='clear';
+    bounceRing3.visible = bounceLine3.visible = showBounce;
+    if (showBounce){
+      bounceRing3.position.set(pj.nose.x*MM, 0.003, pj.nose.y*MM);
+      bounceLine3.geometry.setFromPoints([
+        new THREE.Vector3(pj.pos.x*MM, R*MM, pj.pos.y*MM),
+        new THREE.Vector3((pj.pos.x+pj.dir.x*140)*MM, R*MM, (pj.pos.y+pj.dir.y*140)*MM)]);
+      bounceLine3.computeLineDistances();
+    }
+  }
+
+  /* 叠球图 */
+  updateOverlap(a, sideSign);
+
+  /* 数据 */
+  document.getElementById('angVal').textContent = a.toFixed(1)+'°';
+  document.getElementById('fullVal').textContent = Math.round(full)+'%';
+  document.getElementById('cueDistVal').textContent = (dCue/1000).toFixed(2)+' m';
+  document.getElementById('objDistVal').textContent = (dObj/1000).toFixed(2)+' m';
+  document.getElementById('sideVal').textContent = a<4 ? '正面直击' : (sideSign>0 ? '右切 →' : '← 左切');
+  const dv = document.getElementById('diffVal');
+  let txt, cls;
+  if (a>85){ txt='进不了'; cls='hard'; }
+  else if (a>65){ txt='极薄'; cls='hard'; }
+  else if (a>50){ txt='难'; cls='hard'; }
+  else if (a>30){ txt='中等'; cls='mid'; }
+  else if (a>12){ txt='较易'; cls='easy'; }
+  else { txt='直球'; cls='easy'; }
+  /* 距离加成 */
+  if (a<=85 && dCue+dObj>3500 && cls!=='hard'){ txt+='（远台）'; cls = cls==='easy'?'mid':'hard'; }
+  dv.textContent = txt;
+  dv.className = 'val '+cls;
+  const pv = document.getElementById('potVal');
+  const potTxt = pj.status==='clear' ? '畅通' : (pj.status==='rattle' ? '擦库鼻仍进' : '撞鼻弹出');
+  const potCls = pj.status==='clear' ? 'easy' : (pj.status==='rattle' ? 'mid' : 'hard');
+  pv.textContent = potTxt;
+  pv.className = 'val '+potCls;
+}
+
+/* ================= UI 事件 ================= */
+document.getElementById('segView').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#segView button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  S.view = b.dataset.v;
+  document.getElementById('wrap2d').style.display = S.view==='2d'?'':'none';
+  document.getElementById('wrap3d').style.display = S.view==='3d'?'block':'none';
+  if (S.view==='3d'){ init3d(); resize3d(); goTop(); update(); }
+  else hint(S.mode==='free'?'拖动白球 / 红球 · 点击袋口选择目标袋':'点「换一题」生成新球形');
+});
+document.getElementById('segMode').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#segMode button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  S.mode = b.dataset.m;
+  const rnd = S.mode==='random';
+  document.getElementById('selDiff').style.display = rnd?'':'none';
+  document.getElementById('btnNext').style.display = rnd?'':'none';
+  hint(rnd?'点「换一题」生成新球形':'拖动白球 / 红球 · 点击袋口选择目标袋');
+  if (rnd) randomLayout();
+});
+document.getElementById('btnNext').addEventListener('click', randomLayout);
+document.getElementById('btnAnswer').addEventListener('click', function(){
+  S.showAnswer = !S.showAnswer;
+  this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
+  update();
+});
+document.getElementById('btnTop').addEventListener('click', goTop);
+document.getElementById('btnPlayer').addEventListener('click', goPlayer);
+
+update();
+</script>
+</body>
+</html>
