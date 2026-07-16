@@ -54,12 +54,14 @@
   .stage{width:100%; max-width:1080px; position:relative;}
   #wrap2d, #wrap3d{
     width:100%; border-radius:12px; overflow:hidden; background:#141210;
-    border:1px solid #3a342a;
+    border:1px solid #3a342a; position:relative;
   }
-  #wrap3d{display:none; height:520px; position:relative;}
+  #wrap3d{display:none; height:520px;}
   #view2d{width:100%; display:block; touch-action:none;}
   .cam-btns{position:absolute; top:10px; left:10px; display:flex; gap:6px; z-index:5;}
   .cam-btns .btn{font-size:12px; padding:5px 10px; background:rgba(28,25,21,0.85);}
+  .zoom-btns{position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:5;}
+  .zoom-btns .btn{font-size:16px; padding:4px 12px; line-height:1.4; background:rgba(28,25,21,0.85);}
   .panel-row{
     width:100%; max-width:1080px; display:grid; gap:10px; margin-top:12px;
     grid-template-columns:300px 1fr;
@@ -123,6 +125,11 @@
 <div class="stage">
   <div id="wrap2d">
     <svg id="view2d" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="zoom-btns">
+      <button class="btn" id="btnZoomOut">－</button>
+      <button class="btn" id="btnZoomReset">⤢</button>
+      <button class="btn" id="btnZoomIn">＋</button>
+    </div>
   </div>
   <div id="wrap3d">
     <div class="cam-btns">
@@ -292,7 +299,19 @@ function potJudge(){
 const NS='http://www.w3.org/2000/svg';
 const svg = document.getElementById('view2d');
 const M = CUSHION+40;
-svg.setAttribute('viewBox', `${-L/2-M} ${-W/2-M} ${L+2*M} ${W+2*M}`);
+const BASE_VB = {x:-L/2-M, y:-W/2-M, w:L+2*M, h:W+2*M};
+/* 缩放 / 平移：手机屏幕把整张球台压缩到几百像素宽，触摸热区实际只有几像素，
+   放大后同样的 mm 热区在屏幕上占的像素更多，摆球才好操作。 */
+const Z = {scale:1, cx:0, cy:0};
+const ZOOM_MIN=1, ZOOM_MAX=6;
+function applyZoom(){
+  const w = BASE_VB.w/Z.scale, h = BASE_VB.h/Z.scale;
+  const halfW = w/2, halfH = h/2;
+  Z.cx = clamp(Z.cx, BASE_VB.x+halfW, BASE_VB.x+BASE_VB.w-halfW);
+  Z.cy = clamp(Z.cy, BASE_VB.y+halfH, BASE_VB.y+BASE_VB.h-halfH);
+  svg.setAttribute('viewBox', `${Z.cx-halfW} ${Z.cy-halfH} ${w} ${h}`);
+}
+applyZoom();
 function el(tag, attrs, parent){
   const e = document.createElementNS(NS, tag);
   for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -353,31 +372,75 @@ function svgPoint(evt){
   p.x=evt.clientX; p.y=evt.clientY;
   return p.matrixTransform(svg.getScreenCTM().inverse());
 }
-let drag2d=null;
+/* 拖球 / 单指平移 / 双指缩放：三种手势共用同一套 pointer 事件 */
+let drag2d=null;         // 'cue' | 'obj' | 'pan' | null
+let panStart=null;       // {x,y: 按下时的屏幕像素, cx0,cy0: 按下时的视图中心(mm)}
+let pinchStart=null;     // {d0: 双指初始间距(px), scale0,cx0,cy0}
+const pointers2d = new Map();
 svg.addEventListener('pointerdown', e=>{
-  if (S.mode!=='free') return;
-  const p = svgPoint(e);
-  if (dist(p,S.cue)<80) drag2d='cue';
-  else if (dist(p,S.obj)<80) drag2d='obj';
-  if (drag2d){ svg.setPointerCapture(e.pointerId); e.preventDefault(); }
-});
-svg.addEventListener('pointermove', e=>{
-  if (!drag2d) return;
-  const p = svgPoint(e);
-  const b = S[drag2d];
-  b.x = clamp(p.x, -L/2+R, L/2-R);
-  b.y = clamp(p.y, -W/2+R, W/2-R);
-  /* 防止两球重叠 */
-  const other = drag2d==='cue'?S.obj:S.cue;
-  if (dist(b,other) < 2*R+2){
-    const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
-    b.x = other.x + dx/d*(2*R+2);
-    b.y = other.y + dy/d*(2*R+2);
+  pointers2d.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  try{ svg.setPointerCapture(e.pointerId); }catch(err){}
+  if (pointers2d.size >= 2){
+    drag2d=null; panStart=null;
+    const pts=[...pointers2d.values()];
+    pinchStart = {d0:Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), scale0:Z.scale, cx0:Z.cx, cy0:Z.cy};
+    e.preventDefault();
+    return;
   }
-  update();
+  const p = svgPoint(e);
+  if (S.mode==='free' && dist(p,S.cue)<80) drag2d='cue';
+  else if (S.mode==='free' && dist(p,S.obj)<80) drag2d='obj';
+  else { drag2d='pan'; panStart={x:e.clientX, y:e.clientY, cx0:Z.cx, cy0:Z.cy}; }
   e.preventDefault();
 });
-svg.addEventListener('pointerup', ()=>{ drag2d=null; });
+svg.addEventListener('pointermove', e=>{
+  if (!pointers2d.has(e.pointerId)) return;
+  pointers2d.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if (pinchStart && pointers2d.size>=2){
+    const pts=[...pointers2d.values()];
+    const d1 = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+    Z.scale = clamp(pinchStart.scale0*(d1/(pinchStart.d0||1)), ZOOM_MIN, ZOOM_MAX);
+    applyZoom();
+    e.preventDefault();
+    return;
+  }
+  if (drag2d==='cue' || drag2d==='obj'){
+    const p = svgPoint(e);
+    const b = S[drag2d];
+    b.x = clamp(p.x, -L/2+R, L/2-R);
+    b.y = clamp(p.y, -W/2+R, W/2-R);
+    /* 防止两球重叠 */
+    const other = drag2d==='cue'?S.obj:S.cue;
+    if (dist(b,other) < 2*R+2){
+      const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
+      b.x = other.x + dx/d*(2*R+2);
+      b.y = other.y + dy/d*(2*R+2);
+    }
+    update();
+  } else if (drag2d==='pan' && panStart){
+    const scalePxPerMm = svg.getBoundingClientRect().width / (BASE_VB.w/Z.scale);
+    Z.cx = panStart.cx0 - (e.clientX-panStart.x)/scalePxPerMm;
+    Z.cy = panStart.cy0 - (e.clientY-panStart.y)/scalePxPerMm;
+    applyZoom();
+  }
+  e.preventDefault();
+});
+function endPointer2d(e){
+  pointers2d.delete(e.pointerId);
+  if (pointers2d.size < 2) pinchStart = null;
+  if (pointers2d.size === 1 && drag2d===null){
+    /* 双指缩放松开一指后，用剩下那根手指继续平移，避免手势断档 */
+    const pt = [...pointers2d.values()][0];
+    panStart = {x:pt.x, y:pt.y, cx0:Z.cx, cy0:Z.cy};
+    drag2d = 'pan';
+  }
+  if (pointers2d.size === 0){ drag2d=null; panStart=null; }
+}
+svg.addEventListener('pointerup', endPointer2d);
+svg.addEventListener('pointercancel', endPointer2d);
+document.getElementById('btnZoomIn').addEventListener('click', ()=>{ Z.scale = clamp(Z.scale*1.6, ZOOM_MIN, ZOOM_MAX); applyZoom(); });
+document.getElementById('btnZoomOut').addEventListener('click', ()=>{ Z.scale = clamp(Z.scale/1.6, ZOOM_MIN, ZOOM_MAX); applyZoom(); });
+document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=1; Z.cx=0; Z.cy=0; applyZoom(); });
 
 /* ================= 3D (three.js) ================= */
 const wrap3d = document.getElementById('wrap3d');
