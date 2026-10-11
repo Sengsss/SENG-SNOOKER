@@ -678,7 +678,7 @@ const pkEls = POCKETS.map((p,i)=>{
   const c = POCKET_GEO[i].drop;
   const ring = el('circle',{cx:c.x, cy:c.y, r:p.r+40, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
   const hole = el('circle',{cx:c.x, cy:c.y, r:p.r+30, fill:'transparent', style:'cursor:pointer'});
-  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); if (S.mode==='quiz') return; if (S.pk!==i) setAimOff(0, true); S.pk=i; syncAimSlider(); update(); });
+  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); selectPocket(i); });
   return ring;
 });
 /* 瞄准线 + 假想球（答案层） */
@@ -1023,6 +1023,7 @@ function init3d(){
   /* 3D 拖球（上帝视角 + 自由模式） */
   const ray=new THREE.Raycaster(), mv=new THREE.Vector2();
   const plane=new THREE.Plane(new THREE.Vector3(0,1,0), -Rm);
+  const tablePlane=new THREE.Plane(new THREE.Vector3(0,1,0), 0);
   let drag3=null, dragOff3={x:0,y:0};
   function setRay(e){
     const r=renderer3.domElement.getBoundingClientRect();
@@ -1037,23 +1038,35 @@ function init3d(){
       if (ray.ray.intersectPlane(plane,qh)) setGuess({x:qh.x/MM, y:qh.z/MM});
       return;
     }
-    if (camMode==='player'||S.mode!=='free') return;
+    if (S.mode==='quiz') return;
     setRay(e);
     const hit=new THREE.Vector3();
-    if(!ray.ray.intersectPlane(plane,hit)) return;
-    const pm={x:hit.x/MM, y:hit.z/MM};
-    /* 热区半径：至少 90mm，且屏幕上不小于 ~22px（手机上球台被缩得很小）；取离手指最近的球 */
-    const cw3 = renderer3.domElement.clientWidth, ch3 = renderer3.domElement.clientHeight;
     let best = null;
-    [['cue',S.cue],['obj',S.obj]].forEach(([k,b])=>{
-      const a0 = new THREE.Vector3(b.x*MM, Rm, b.y*MM).project(cam3);
-      const a1 = new THREE.Vector3(b.x*MM+0.1, Rm, b.y*MM).project(cam3);
-      const pxPer100 = Math.hypot((a1.x-a0.x)*cw3/2, (a1.y-a0.y)*ch3/2) || 1;
-      const rad = Math.max(90, 22/(pxPer100/100));
-      const r = dist(pm,b)/rad;
-      if (r<1 && (!best || r<best.r)) best = {k, r, b};
-    });
-    if (best){ drag3 = best.k; dragOff3 = {x:best.b.x-pm.x, y:best.b.y-pm.y}; e.preventDefault(); }
+    /* 拖球（仅自由摆放、非第一人称）：热区至少 90mm 且屏幕上不小于 ~22px；取离手指最近的球 */
+    if (camMode!=='player' && S.mode==='free' && ray.ray.intersectPlane(plane,hit)){
+      const pm={x:hit.x/MM, y:hit.z/MM};
+      const cw3 = renderer3.domElement.clientWidth, ch3 = renderer3.domElement.clientHeight;
+      [['cue',S.cue],['obj',S.obj]].forEach(([k,b])=>{
+        const a0 = new THREE.Vector3(b.x*MM, Rm, b.y*MM).project(cam3);
+        const a1 = new THREE.Vector3(b.x*MM+0.1, Rm, b.y*MM).project(cam3);
+        const pxPer100 = Math.hypot((a1.x-a0.x)*cw3/2, (a1.y-a0.y)*ch3/2) || 1;
+        const rad = Math.max(90, 22/(pxPer100/100));
+        const r = dist(pm,b)/rad;
+        if (r<1 && (!best || r<best.r)) best = {k, r, b};
+      });
+      if (best){ drag3 = best.k; dragOff3 = {x:best.b.x-pm.x, y:best.b.y-pm.y}; e.preventDefault(); return; }
+    }
+    /* 没抓到球：点袋口 = 选目标袋（所有非测验模式、所有机位） */
+    const th = new THREE.Vector3();
+    if (ray.ray.intersectPlane(tablePlane, th)){
+      const tp = {x:th.x/MM, y:th.z/MM};
+      let pick = -1, pd = 150;
+      POCKET_GEO.forEach((g,i)=>{
+        const d = Math.min(dist(tp,g.mouthMid), dist(tp,g.drop), dist(tp,POCKETS[i]));
+        if (d<pd){ pd = d; pick = i; }
+      });
+      if (pick>=0){ selectPocket(pick); e.preventDefault(); }
+    }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
     if(!drag3) return;
@@ -1093,7 +1106,7 @@ function resize3d(){
 function goTop(){
   camMode='top';
   tPos.set(0,3.6,0.02); tLook.set(0,0,0);
-  hint('上帝视角：自由模式下可拖动球');
+  hint('上帝视角：拖动球（自由摆放）· 点袋口选目标袋');
   setHudMode();
 }
 function setHudMode(){
@@ -1871,6 +1884,11 @@ document.getElementById('btnAnswer').addEventListener('click', function(){
   update();
   followCam();
 });
+function selectPocket(i){
+  if (S.mode==='quiz') return;
+  if (S.pk!==i) setAimOff(0, true);
+  S.pk = i; syncAimSlider(); update(); followCam();
+}
 function syncAimSlider(){
   const r = POCKETS[S.pk].r, sl = document.getElementById('aimOff');
   sl.min = -r; sl.max = r; sl.value = Math.round(S.aimOff);
