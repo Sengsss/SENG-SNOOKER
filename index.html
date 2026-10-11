@@ -119,6 +119,7 @@
   </select>
   <button class="btn" id="btnNext" style="display:none;">换一题 ⟳</button>
   <button class="btn" id="btnAnswer">隐藏答案 👁</button>
+  <button class="btn" id="btnFan">袋口扇形 ◔</button>
   <span class="hint" id="hintText">拖动白球 / 红球 · 点击袋口选择目标袋</span>
 </div>
 
@@ -153,6 +154,7 @@
     <div class="card"><div class="lbl">难度评估</div><div class="val" id="diffVal">--</div></div>
     <div class="card"><div class="lbl">切球方向</div><div class="val small" id="sideVal">--</div></div>
     <div class="card"><div class="lbl">进袋判定</div><div class="val" id="potVal">--</div></div>
+    <div class="card"><div class="lbl">进袋窗口 Pot window</div><div class="val small" id="fanVal">--</div></div>
   </div>
 </div>
 
@@ -201,17 +203,23 @@ const POCKETS = [
 const NOSE_R = 12;          // 袋口鼻圆角半径（10-13mm 规格区间取中值）
 const JAW_LEN = 80;         // 喉道斜面长度
 const MID_FLARE = 12 * Math.PI/180;   // 中袋喉道外张角
+const CORNER_FLARE = 25 * Math.PI/180; // 角袋喉道相对对角线的外张角（鼻后袋腔变宽）
+const CUSHION_PROBE = 700;  // 库边面障碍的探测长度
 const DROP_DEPTH = 45;      // 球心越过鼻圆心连线多深算落袋
 function buildPocketGeo(p){
   const r = NOSE_R, ax = {x:0,y:0};
-  let A, B, dirA, dirB;
+  let A, B, dirA, dirB, backA, backB;
   if (p.r === CORNER_R){
     const sx = Math.sign(p.x), sy = Math.sign(p.y);
     const d = (2*CORNER_R + 2*r)/Math.SQRT2 - r;   // 鼻圆心沿库边距台角
     A = {x:p.x - sx*d, y:p.y + sy*r};               // 长库上的鼻
     B = {x:p.x + sx*r, y:p.y - sy*d};               // 短库上的鼻
     ax.x = sx/Math.SQRT2; ax.y = sy/Math.SQRT2;
-    dirA = dirB = {x:ax.x, y:ax.y};
+    const pa = {x:(A.x-B.x)/Math.hypot(A.x-B.x,A.y-B.y), y:(A.y-B.y)/Math.hypot(A.x-B.x,A.y-B.y)};
+    const cf = Math.cos(CORNER_FLARE), sf = Math.sin(CORNER_FLARE);
+    dirA = {x:ax.x*cf + pa.x*sf, y:ax.y*cf + pa.y*sf};
+    dirB = {x:ax.x*cf - pa.x*sf, y:ax.y*cf - pa.y*sf};
+    backA = {x:-sx, y:0}; backB = {x:0, y:-sy};
   } else {
     const sy = Math.sign(p.y), m = MID_R + r;
     A = {x:-m, y:p.y + sy*r}; B = {x:m, y:p.y + sy*r};
@@ -219,10 +227,14 @@ function buildPocketGeo(p){
     const f = MID_FLARE;
     dirA = {x:-Math.sin(f), y:sy*Math.cos(f)};
     dirB = {x: Math.sin(f), y:sy*Math.cos(f)};
+    backA = {x:-1, y:0}; backB = {x:1, y:0};
   }
   const mouthMid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
-  const noses = [{c:A, dir:dirA}, {c:B, dir:dirB}].map(n=>({
-    c:n.c, dir:n.dir, end:{x:n.c.x+n.dir.x*JAW_LEN, y:n.c.y+n.dir.y*JAW_LEN}
+  /* back：沿库边面反向延伸的线段端点。与鼻圆同半径的胶囊，其表面恰好就是库边面，
+     所以判定时球心被挡在「库边 + R」之外，斜着从库边穿出去的路径不会被算进袋。 */
+  const noses = [{c:A, dir:dirA, back:backA}, {c:B, dir:dirB, back:backB}].map(n=>({
+    c:n.c, dir:n.dir, end:{x:n.c.x+n.dir.x*JAW_LEN, y:n.c.y+n.dir.y*JAW_LEN},
+    wall:{x:n.c.x+n.back.x*CUSHION_PROBE, y:n.c.y+n.back.y*CUSHION_PROBE}
   }));
   return {
     corner: p.r === CORNER_R, axis:ax, mouthMid, noses,
@@ -260,6 +272,7 @@ const S = {
   obj: {x:600, y:-200},
   pk: 5,
   showAnswer: true,
+  showFan: true,
   mode: 'free',
   view: '2d',
 };
@@ -327,8 +340,10 @@ function simulatePot(origin, dir0, geo){
     const tDrop = Math.max(0, (geo.dropProj-(pos.x*ax.x+pos.y*ax.y))/dn);
     let best = null;
     for (const n of geo.noses){
-      const h = rayCapsule(pos, dir, tDrop, n.c, n.end, rho);
-      if (h && (!best || h.t<best.t)) best = {t:h.t, normal:h.normal, nose:n};
+      for (const seg of [n.end, n.wall]){
+        const h = rayCapsule(pos, dir, tDrop, n.c, seg, rho);
+        if (h && (!best || h.t<best.t)) best = {t:h.t, normal:h.normal, nose:n};
+      }
     }
     if (!best){
       pts.push({x:pos.x+dir.x*tDrop, y:pos.y+dir.y*tDrop});
@@ -348,6 +363,37 @@ function potJudge(){
   const p = POCKETS[S.pk], o = S.obj;
   const dd = dist(o,p)||1;
   return simulatePot(o, {x:(p.x-o.x)/dd, y:(p.y-o.y)/dd}, POCKET_GEO[S.pk]);
+}
+
+/* 可进袋扇形：以目标球为圆心，向袋口方向左右各扫 FAN_MAX°，每 0.1° 做一次进袋模拟。
+   inner = 直接进袋（clear）的连续角度区间；outer = 含「擦鼻仍进」（rattle）的区间。
+   区间都取「离瞄准袋心方向最近的那一段连续角度」。角度相对 base（目标球→袋心）。 */
+const FAN_MAX = 50, FAN_STEP = 0.1;
+function potFan(){
+  const p = POCKETS[S.pk], o = S.obj, geo = POCKET_GEO[S.pk];
+  const base = Math.atan2(p.y-o.y, p.x-o.x);
+  const n = Math.round(FAN_MAX/FAN_STEP), st = FAN_STEP*Math.PI/180;
+  const ok1 = new Array(2*n+1), ok2 = new Array(2*n+1);
+  for (let i=-n; i<=n; i++){
+    const a = base+i*st;
+    const s = simulatePot(o, {x:Math.cos(a), y:Math.sin(a)}, geo).status;
+    ok1[i+n] = s==='clear'; ok2[i+n] = s!=='out';
+  }
+  function range(ok){
+    let j = -1;
+    for (let k=0; k<=n && j<0; k++){
+      if (ok[n+k]) j = n+k; else if (ok[n-k]) j = n-k;
+    }
+    if (j<0) return null;
+    let lo=j, hi=j;
+    while (lo>0 && ok[lo-1]) lo--;
+    while (hi<ok.length-1 && ok[hi+1]) hi++;
+    return {lo:(lo-n)*st, hi:(hi-n)*st};
+  }
+  const inner = range(ok1), outer = range(ok2);
+  const dist0 = dist(o, p);
+  return {base, inner, outer, dist0, reach:dist(o, geo.drop),
+          widthMm: inner ? dist0*(Math.tan(inner.hi)-Math.tan(inner.lo)) : 0};
 }
 
 /* ================= 2D (SVG) ================= */
@@ -422,6 +468,17 @@ const pkEls = POCKETS.map((p,i)=>{
 });
 /* 瞄准线 + 假想球（答案层） */
 const gAns = el('g',{});
+const fanOuter2d = el('polygon',{fill:'#e0a84e', opacity:0.16}, gAns);
+const fanInner2d = el('polygon',{fill:'#c9a45c', opacity:0.30}, gAns);
+function fanPoints(o, base, lo, hi, rad){
+  const steps = Math.max(2, Math.ceil((hi-lo)*180/Math.PI/1.5));
+  const pts = [o.x+','+o.y];
+  for (let i=0;i<=steps;i++){
+    const a = base+lo+(hi-lo)*i/steps;
+    pts.push((o.x+Math.cos(a)*rad)+','+(o.y+Math.sin(a)*rad));
+  }
+  return pts.join(' ');
+}
 const lnOP = el('line',{stroke:'#c9a45c','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
 const lnCG = el('line',{stroke:'#7ab8f5','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
 const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'stroke-dasharray':'12 10'}, gAns);
@@ -520,7 +577,22 @@ document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let bounceRing3, bounceLine3;
+let bounceRing3, bounceLine3, fanOuter3, fanInner3;
+function setFan3(mesh, o, base, rng, rad){
+  mesh.geometry.dispose();
+  if (!rng){ mesh.visible = false; return; }
+  const steps = Math.max(2, Math.ceil((rng.hi-rng.lo)*180/Math.PI/1.5)), v = [];
+  let prev = null;
+  for (let i=0;i<=steps;i++){
+    const a = base+rng.lo+(rng.hi-rng.lo)*i/steps;
+    const q = [(o.x+Math.cos(a)*rad)*MM, (o.y+Math.sin(a)*rad)*MM];
+    if (prev) v.push(o.x*MM,0,o.y*MM, prev[0],0,prev[1], q[0],0,q[1]);
+    prev = q;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v,3));
+  mesh.geometry = g; mesh.visible = true;
+}
 let camPos, camLook, tPos, tLook, camMode='top';
 
 function init3d(){
@@ -614,6 +686,11 @@ function init3d(){
       scene3.add(box);
     });
   });
+  /* 可进袋扇形（3D）：两片贴台呢的扇形，几何每次 update 重建 */
+  fanOuter3 = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({color:0xe0a84e, transparent:true, opacity:0.2, side:THREE.DoubleSide, depthWrite:false}));
+  fanInner3 = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({color:0xc9a45c, transparent:true, opacity:0.4, side:THREE.DoubleSide, depthWrite:false}));
+  fanOuter3.position.y = 0.0015; fanInner3.position.y = 0.0018;
+  scene3.add(fanOuter3); scene3.add(fanInner3);
   ball3.target = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.007, 8, 32), new THREE.MeshBasicMaterial({color:0xc9a45c}));
   ball3.target.rotation.x=-Math.PI/2;
   scene3.add(ball3.target);
@@ -882,6 +959,11 @@ function update(){
   lnCG.setAttribute('x1',S.cue.x); lnCG.setAttribute('y1',S.cue.y);
   lnCG.setAttribute('x2',g.x); lnCG.setAttribute('y2',g.y);
   gAns.setAttribute('opacity', S.showAnswer?1:0);
+  const fan = potFan();
+  const fanOn = S.showFan;
+  const fo = fanOn ? fan.outer : null, fi = fanOn ? fan.inner : null;
+  fanOuter2d.setAttribute('points', fo ? fanPoints(S.obj, fan.base, fo.lo, fo.hi, fan.reach) : '');
+  fanInner2d.setAttribute('points', fi ? fanPoints(S.obj, fan.base, fi.lo, fi.hi, fan.reach) : '');
   pkEls.forEach((r,i)=> r.setAttribute('opacity', i===S.pk?1:0));
   if (pj.status==='clear'){
     gBounce.setAttribute('opacity',0);
@@ -910,6 +992,8 @@ function update(){
       new THREE.Vector3(g.x*MM, R*MM, g.y*MM)]);
     lnCG3.computeLineDistances();
     ghost3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
+    setFan3(fanOuter3, S.obj, fan.base, S.showAnswer ? fo : null, fan.reach);
+    setFan3(fanInner3, S.obj, fan.base, S.showAnswer ? fi : null, fan.reach);
     const showBounce = S.showAnswer && pj.status!=='clear';
     bounceRing3.visible = bounceLine3.visible = showBounce;
     if (showBounce){
@@ -946,6 +1030,10 @@ function update(){
   const potCls = pj.status==='clear' ? 'easy' : (pj.status==='rattle' ? 'mid' : 'hard');
   pv.textContent = potTxt;
   pv.className = 'val '+potCls;
+  document.getElementById('fanVal').textContent = fan.inner
+    ? (fan.inner.hi-fan.inner.lo)*180/Math.PI < 0.05 ? '几乎为 0'
+      : ((fan.inner.hi-fan.inner.lo)*180/Math.PI).toFixed(1)+'° · 袋口处 ≈'+Math.round(fan.widthMm)+'mm'
+    : '无直进角度';
 }
 
 /* ================= UI 事件 ================= */
@@ -974,6 +1062,11 @@ document.getElementById('btnNext').addEventListener('click', randomLayout);
 document.getElementById('btnAnswer').addEventListener('click', function(){
   S.showAnswer = !S.showAnswer;
   this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
+  update();
+});
+document.getElementById('btnFan').addEventListener('click', function(){
+  S.showFan = !S.showFan;
+  this.style.opacity = S.showFan ? 1 : 0.5;
   update();
 });
 document.getElementById('btnTop').addEventListener('click', goTop);
