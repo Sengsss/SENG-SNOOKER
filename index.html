@@ -1917,9 +1917,11 @@ document.getElementById('btnStatsClear').addEventListener('click', ()=>{
 
 /* ================= 白球左右微调（键盘 ← → / 屏幕按钮；Shift = 微调 1mm，否则 4mm） =================
    第一 / 第三人称：沿「垂直于出杆方向」平移（真正的左右）；2D / 上帝视角：沿台面 x 轴。 */
-function nudgeCue(sgn, fine){
+/* 持续移动：按住期间由 requestAnimationFrame 逐帧按速度移动（起步慢、越按越快；Shift 为精调），
+   不依赖系统的按键重复——那个有约 0.5 秒的起步延迟，手感「一顿一顿」。 */
+const NUDGE = {src:{key:0, btn:0}, dir:0, fine:false, t0:0, last:0, raf:0};
+function nudgeMm(mm){
   if (S.mode!=='free' && S.mode!=='random') return;
-  const step = (fine?1:4)*sgn;
   let rx = 1, ry = 0;
   if (S.view==='3d' && camMode!=='top'){
     const ref = S.showAnswer ? ghostPos() : S.obj;
@@ -1927,8 +1929,8 @@ function nudgeCue(sgn, fine){
     rx = -dy/l; ry = dx/l;
   }
   const b = S.cue;
-  b.x = clamp(b.x+rx*step, -L/2+R, L/2-R);
-  b.y = clamp(b.y+ry*step, -W/2+R, W/2-R);
+  b.x = clamp(b.x+rx*mm, -L/2+R, L/2-R);
+  b.y = clamp(b.y+ry*mm, -W/2+R, W/2-R);
   const o = S.obj;
   if (dist(b,o) < 2*R+2){
     const dx = b.x-o.x, dy = b.y-o.y, d = Math.hypot(dx,dy)||1;
@@ -1936,27 +1938,60 @@ function nudgeCue(sgn, fine){
   }
   update(); followCam();
 }
+function nudgeTick(ts){
+  if (!NUDGE.dir){ NUDGE.raf = 0; return; }
+  const dt = Math.min(0.05, (ts-NUDGE.last)/1000);
+  NUDGE.last = ts;
+  const held = (ts-NUDGE.t0)/1000;
+  const v = NUDGE.fine ? 30 : Math.min(320, 70+260*held);          // mm/s
+  nudgeMm(NUDGE.dir*v*dt);
+  NUDGE.raf = requestAnimationFrame(nudgeTick);
+}
+function nudgeSync(fine){
+  const d = Math.sign(NUDGE.src.key || NUDGE.src.btn);
+  if (d !== NUDGE.dir){ NUDGE.t0 = performance.now(); NUDGE.last = NUDGE.t0; }
+  NUDGE.dir = d; NUDGE.fine = !!fine;
+  if (d && !NUDGE.raf){
+    NUDGE.t0 = NUDGE.last = performance.now();
+    nudgeMm(d*(fine?0.5:1.5));                                     // 点一下也有明确的小位移
+    NUDGE.raf = requestAnimationFrame(nudgeTick);
+  }
+}
 function syncNudge(){
   document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random') ? 'flex' : 'none';
 }
-window.addEventListener('keydown', e=>{
-  if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+function nudgeKeyOk(e){
+  if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return false;
   const t = document.activeElement && document.activeElement.tagName;
-  if (t==='INPUT' || t==='SELECT' || t==='TEXTAREA') return;      // 滑条 / 下拉框自己吃方向键
-  if (document.getElementById('statsModal').style.display!=='none') return;
+  if (t==='INPUT' || t==='SELECT' || t==='TEXTAREA') return false;   // 滑条 / 下拉框自己吃方向键
+  if (document.getElementById('statsModal').style.display!=='none') return false;
+  return true;
+}
+const nudgeKeys = {ArrowLeft:false, ArrowRight:false};
+window.addEventListener('keydown', e=>{
+  if (!nudgeKeyOk(e)) return;
   e.preventDefault();
-  nudgeCue(e.key==='ArrowRight' ? 1 : -1, e.shiftKey);
+  nudgeKeys[e.key] = true;
+  NUDGE.src.key = (nudgeKeys.ArrowRight?1:0) - (nudgeKeys.ArrowLeft?1:0);
+  nudgeSync(e.shiftKey);
 });
-/* 按住按钮连续移动 */
+window.addEventListener('keyup', e=>{
+  if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+  nudgeKeys[e.key] = false;
+  NUDGE.src.key = (nudgeKeys.ArrowRight?1:0) - (nudgeKeys.ArrowLeft?1:0);
+  nudgeSync(e.shiftKey);
+});
+window.addEventListener('blur', ()=>{                               // 切走窗口时松开所有键，避免一直滑
+  nudgeKeys.ArrowLeft = nudgeKeys.ArrowRight = false; NUDGE.src.key = NUDGE.src.btn = 0; nudgeSync(false);
+});
+/* 屏幕按钮：按住连续移动 */
 [['btnNudgeL',-1],['btnNudgeR',1]].forEach(([id,sgn])=>{
   const btn = document.getElementById(id);
-  let t1 = null, t2 = null;
-  const stop = ()=>{ clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+  const stop = ()=>{ if (NUDGE.src.btn===sgn){ NUDGE.src.btn = 0; nudgeSync(false); } };
   btn.addEventListener('pointerdown', e=>{
     e.preventDefault();
     try{ btn.setPointerCapture(e.pointerId); }catch(err){}
-    nudgeCue(sgn, false);
-    t1 = setTimeout(()=>{ t2 = setInterval(()=>nudgeCue(sgn,false), 50); }, 350);
+    NUDGE.src.btn = sgn; nudgeSync(false);
   });
   ['pointerup','pointercancel','lostpointercapture'].forEach(ev=> btn.addEventListener(ev, stop));
   btn.addEventListener('contextmenu', e=>e.preventDefault());
@@ -2029,7 +2064,7 @@ window.addEventListener('keydown', e=>{
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v14');
+    add('版本缓存', 'v15');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
