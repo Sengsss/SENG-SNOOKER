@@ -1,4 +1,4 @@
-const CACHE = 'snooker-trainer-v16';
+const CACHE = 'snooker-trainer-v18';
 const ASSETS = [
   './',
   './index.html',

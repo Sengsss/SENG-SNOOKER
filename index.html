@@ -89,12 +89,11 @@
   .diagout{background:#12100d; border:1px solid #3a342a; border-radius:8px; padding:10px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; max-height:260px; overflow:auto; color:var(--text);}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
-  #wrap2d, #wrap3d{
+  #wrap3d{
     width:100%; border-radius:12px; overflow:hidden; background:#141210;
     border:1px solid #3a342a; position:relative;
   }
-  #wrap3d{display:none; height:520px;}
-  #view2d{width:100%; display:block; touch-action:none;}
+  #wrap3d{height:520px;}
   .tools-row{display:contents;}
   .nudge{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:6; display:flex; gap:10px;}
   .nudge .btn{width:54px; height:44px; font-size:18px; padding:0; background:rgba(28,25,21,0.88); border-color:var(--brass-dim); touch-action:none; user-select:none; -webkit-user-select:none;}
@@ -111,8 +110,6 @@
   .inset-title{position:absolute; left:0; right:0; top:0; z-index:1; background:rgba(0,0,0,.85); font-size:11px; padding:2px 6px;}
   .inset svg{position:absolute; inset:0; width:100%; height:100%; display:block;}
   .hud3.notop .inset{display:block;} .hud3.top .inset{display:none;} .hud3.noins .inset{display:none !important;}
-  .zoom-btns{position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:5;}
-  .zoom-btns .btn{font-size:16px; padding:4px 12px; line-height:1.4; background:rgba(28,25,21,0.85);}
   .panel-row{
     width:100%; max-width:1080px; display:grid; gap:10px; margin-top:12px;
     grid-template-columns:300px 1fr;
@@ -146,8 +143,7 @@
   @media (max-width:760px){
     .tools-row{display:flex; justify-content:center; align-items:center; gap:22px; margin-top:8px;}
     .zoom-btns, .nudge{position:static; transform:none;}
-    .zoom-btns .btn{font-size:20px; padding:6px 16px; background:var(--panel2);}
-    .nudge .btn{background:var(--panel2);}
+      .nudge .btn{background:var(--panel2);}
   }
   /* 触屏：控件至少约 40px 高，手指好点 */
   @media (pointer:coarse){
@@ -163,7 +159,8 @@
     .card .val{font-size:18px;}
     #wrap3d{height:470px;}
     .inset{width:min(30%,120px);}
-    .hud-stats{top:46px; font-size:13px;} .hud-stats b{font-size:15px;}
+    .hud-stats{top:88px; left:12px; right:12px; display:flex; flex-wrap:wrap; gap:2px 14px; font-size:13px;}
+    .hud-stats span{width:auto; margin-right:4px;} .hud-stats b{font-size:15px;}
     .cam-btns{flex-wrap:wrap; right:10px;}
     .cam-btns .btn{padding:6px 10px;}
   }
@@ -177,10 +174,6 @@
 </header>
 
 <div class="bar">
-  <div class="seg" id="segView">
-    <button data-v="2d" class="on">2D 俯视</button>
-    <button data-v="3d">3D 球台</button>
-  </div>
   <div class="seg" id="segMode">
     <button data-m="free" class="on">自由摆放</button>
     <button data-m="random">系统随机</button>
@@ -229,9 +222,6 @@
 </div>
 
 <div class="stage">
-  <div id="wrap2d">
-    <svg id="view2d" xmlns="http://www.w3.org/2000/svg"></svg>
-  </div>
   <div id="wrap3d">
     <div class="cam-btns">
       <button class="btn" id="btnTop">上帝视角</button>
@@ -255,11 +245,6 @@
     </div>
   </div>
   <div class="tools-row">
-    <div class="zoom-btns" id="zoomBtns">
-      <button class="btn" id="btnZoomOut">－</button>
-      <button class="btn" id="btnZoomReset">⤢</button>
-      <button class="btn" id="btnZoomIn">＋</button>
-    </div>
     <div class="nudge" id="nudge" title="移动白球：键盘 ← → （Shift 微调）">
     <button class="btn" id="btnNudgeL" aria-label="白球向左">◀</button>
     <button class="btn" id="btnNudgeR" aria-label="白球向右">▶</button>
@@ -515,7 +500,6 @@ const S = {
   aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
   bank: null,      // null | 'top' | 'bottom' | 'left' | 'right'：借一库
   mode: 'free',
-  view: '2d',
 };
 
 /* v2 测验状态：type = ghost（点选假想球）| ov（叠球 x/8）；phase = ask | result */
@@ -732,187 +716,15 @@ function fanTris(fan, rng){
   return tris;
 }
 
-/* ================= 2D (SVG) ================= */
+/* ================= SVG 辅助（叠球图 / 3D 小图 / 击球点小图共用） ================= */
 const NS='http://www.w3.org/2000/svg';
-const svg = document.getElementById('view2d');
-const M = CUSHION+40;
-const BASE_VB = {x:-L/2-M, y:-W/2-M, w:L+2*M, h:W+2*M};
-/* 缩放 / 平移：手机屏幕把整张球台压缩到几百像素宽，触摸热区实际只有几像素，
-   放大后同样的 mm 热区在屏幕上占的像素更多，摆球才好操作。 */
-const Z = {scale:1, cx:0, cy:0};
-const ZOOM_MIN=1, ZOOM_MAX=6;
-function applyZoom(){
-  const w = BASE_VB.w/Z.scale, h = BASE_VB.h/Z.scale;
-  const halfW = w/2, halfH = h/2;
-  Z.cx = clamp(Z.cx, BASE_VB.x+halfW, BASE_VB.x+BASE_VB.w-halfW);
-  Z.cy = clamp(Z.cy, BASE_VB.y+halfH, BASE_VB.y+BASE_VB.h-halfH);
-  svg.setAttribute('viewBox', `${Z.cx-halfW} ${Z.cy-halfH} ${w} ${h}`);
-}
-applyZoom();
 function el(tag, attrs, parent){
   const e = document.createElementNS(NS, tag);
   for (const k in attrs) e.setAttribute(k, attrs[k]);
-  (parent||svg).appendChild(e);
+  parent.appendChild(e);
   return e;
 }
-/* 木框 + 台呢 */
-el('rect',{x:-L/2-CUSHION-30, y:-W/2-CUSHION-30, width:L+2*CUSHION+60, height:W+2*CUSHION+60, rx:34, fill:'#4a3421'});
-el('rect',{x:-L/2, y:-W/2, width:L, height:W, fill:'#35794B'});
-/* 袋口喉道底色（黑） */
-POCKET_GEO.forEach(g=>{
-  const t = throatShape(g);
-  el('polygon',{points:t.q.map(v=>v.x+','+v.y).join(' '), fill:'#050403'});
-  el('circle',{cx:t.disc.cx, cy:t.disc.cy, r:t.disc.r, fill:'#050403'});
-});
-/* 库边：6 段独立矩形，端头由喉道斜面（胶囊）的鼻圆接上 */
-CUSHIONS.forEach(seg=>{
-  if (seg.side==='y'){
-    const rx0 = Math.min(seg.x1,seg.x2), w = Math.abs(seg.x2-seg.x1);
-    const ry0 = seg.sign>0 ? seg.y : seg.y-CUSHION;
-    el('rect',{x:rx0, y:ry0, width:w, height:CUSHION, fill:'#2a5f3c'});
-  } else {
-    const ry0 = Math.min(seg.y1,seg.y2), h = Math.abs(seg.y2-seg.y1);
-    const rx0 = seg.sign>0 ? seg.x : seg.x-CUSHION;
-    el('rect',{x:rx0, y:ry0, width:CUSHION, height:h, fill:'#2a5f3c'});
-  }
-});
-/* 鼻 + 喉道斜面（与判定用的胶囊同一份数据） */
-POCKET_GEO.forEach(g=> g.noses.forEach(n=>
-  el('line',{x1:n.c.x, y1:n.c.y, x2:n.end.x, y2:n.end.y, stroke:'#2a5f3c',
-    'stroke-width':2*NOSE_R, 'stroke-linecap':'round'})));
-/* baulk line + D */
-el('line',{x1:-L/2+BAULK, y1:-W/2, x2:-L/2+BAULK, y2:W/2, stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
-el('path',{d:`M ${-L/2+BAULK} ${-D_R} A ${D_R} ${D_R} 0 0 0 ${-L/2+BAULK} ${D_R}`, fill:'none', stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
-SPOTS.forEach(s=> el('circle',{cx:s.x, cy:s.y, r:9, fill:'#d9d2c0', opacity:0.85}));
-/* 袋口选择热区 + 高亮环（落袋点 = 喉道内的 drop） */
-const pkEls = POCKETS.map((p,i)=>{
-  const c = POCKET_GEO[i].drop;
-  const ring = el('circle',{cx:c.x, cy:c.y, r:p.r+40, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
-  const hole = el('circle',{cx:c.x, cy:c.y, r:p.r+30, fill:'transparent', style:'cursor:pointer'});
-  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); selectPocket(i); });
-  return ring;
-});
-/* 瞄准线 + 假想球（答案层） */
-const gAns = el('g',{});
-const fanOuter2d = el('path',{fill:'#e0a84e', opacity:0.16}, gAns);
-const fanInner2d = el('path',{fill:'#c9a45c', opacity:0.30}, gAns);
-const trisPath = t=> t.map(v=>`M${v[0].x} ${v[0].y}L${v[1].x} ${v[1].y}L${v[2].x} ${v[2].y}Z`).join('');
-/* 借库：库边高亮 + 镜像袋口 */
-const gMirror = el('g',{opacity:0}, gAns);
-const bankFace = el('line',{stroke:'#c9a45c','stroke-width':8,'stroke-linecap':'round',opacity:0.9}, gMirror);
-const mirrorLine = el('line',{stroke:'#c9a45c','stroke-width':3,'stroke-dasharray':'4 12',opacity:0.6}, gMirror);
-const mirrorHole = el('circle',{r:50, fill:'none', stroke:'#e8e2d6','stroke-width':4,'stroke-dasharray':'10 8'}, gMirror);
-const mirrorTxt = el('text',{fill:'#e8e2d6','font-size':52,'font-weight':600,'text-anchor':'middle'}, gMirror);
-mirrorTxt.textContent = '镜像袋口';
-const lnOP = el('polyline',{fill:'none', stroke:'#c9a45c','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
-const lnCG = el('line',{stroke:'#7ab8f5','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
-const aimHandle = el('g',{}, gAns);
-el('circle',{r:24, fill:'#c9a45c', opacity:0.85, stroke:'#1c1915','stroke-width':4}, aimHandle);
-el('circle',{r:8, fill:'#1c1915'}, aimHandle);
-const engCb = el('circle',{r:R, fill:'none', stroke:'#7ad0f5','stroke-width':4,'stroke-dasharray':'3 8','stroke-linecap':'round'}, gAns);
-const engPath = el('polyline',{fill:'none', stroke:'#7ad0f5','stroke-width':5,'stroke-dasharray':'3 9','stroke-linecap':'round'}, gAns);
-const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'stroke-dasharray':'12 10'}, gAns);
-/* 撞鼻反弹可视化：只在会撞鼻时出现 */
-const gBounce = el('g',{opacity:0}, gAns);
-const bounceNoseRing = el('circle',{r:NOSE_R+6, fill:'none', stroke:'#e05c5c','stroke-width':3}, gBounce);
-const bounceHit = el('circle',{r:6, fill:'#e05c5c'}, gBounce);
-const bouncePath = el('polyline',{fill:'none', stroke:'#e05c5c','stroke-width':4,'stroke-dasharray':'6 6'}, gBounce);
-/* 球（含放大的触摸热区） */
-function makeBall(fill, stroke){
-  const g = el('g',{style:'cursor:grab'});
-  el('circle',{r:R, fill:fill, stroke:stroke,'stroke-width':2}, g);
-  el('circle',{r:R*0.35, cx:-R*0.28, cy:-R*0.28, fill:'#fff', opacity:0.35}, g);
-  el('circle',{r:70, fill:'transparent'}, g);
-  return g;
-}
-const bObj = makeBall('#c8342b','#7a1712');
-const bCue = makeBall('#f3eee0','#b8b09a');
-/* 测验层：你放的假想球 / 你的出杆线 / 判分后的误差线与红球实际走向 */
-const gQuiz = el('g',{'pointer-events':'none'});
-const qAim = el('line',{stroke:'#c9a45c','stroke-width':4,'stroke-dasharray':'14 12',opacity:0.8}, gQuiz);
-const qPath = el('polyline',{fill:'none', stroke:'#e05c5c','stroke-width':5,'stroke-dasharray':'6 8'}, gQuiz);
-const qErr = el('line',{stroke:'#e05c5c','stroke-width':5}, gQuiz);
-const qGuess = el('circle',{r:R, fill:'#c9a45c','fill-opacity':0.28, stroke:'#c9a45c','stroke-width':5}, gQuiz);
-const qDot = el('circle',{r:6, fill:'#c9a45c'}, gQuiz);
-
-/* 触控热区：按屏幕像素保底（约 26px 半径），放大后自然回到 mm 规格 */
-function hitR(mm){
-  const pxPerMm = svg.getBoundingClientRect().width / (BASE_VB.w/Z.scale);
-  return Math.max(mm, 22/(pxPerMm||1));
-}
-function svgPoint(evt){
-  const p = svg.createSVGPoint();
-  p.x=evt.clientX; p.y=evt.clientY;
-  return p.matrixTransform(svg.getScreenCTM().inverse());
-}
-/* 拖球 / 单指平移 / 双指缩放：三种手势共用同一套 pointer 事件 */
-let tapStart=null;       // 点按候选：未移动就抬起 → 点库边设置借库
-let dragOff={x:0,y:0};   // 抓取点相对球心的偏移（mm）
-let drag2d=null;         // 'cue' | 'obj' | 'pan' | null
-let panStart=null;       // {x,y: 按下时的屏幕像素, cx0,cy0: 按下时的视图中心(mm)}
-let pinchStart=null;     // {d0: 双指初始间距(px), scale0,cx0,cy0}
-const pointers2d = new Map();
-svg.addEventListener('pointerdown', e=>{
-  pointers2d.set(e.pointerId, {x:e.clientX, y:e.clientY});
-  try{ svg.setPointerCapture(e.pointerId); }catch(err){}
-  if (pointers2d.size >= 2){
-    drag2d=null; panStart=null; tapStart=null;
-    const pts=[...pointers2d.values()];
-    pinchStart = {d0:Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), scale0:Z.scale, cx0:Z.cx, cy0:Z.cy};
-    e.preventDefault();
-    return;
-  }
-  const p = svgPoint(e);
-  /* 候选目标：按「离中心距离 / 热区半径」取最小者，几个热区重叠时抓到离手指最近的 */
-  const cands = [];
-  if (Q.on && Q.type==='ghost' && Q.phase==='ask' && Q.guess) cands.push(['guess', Q.guess, 90]);
-  if (S.showAnswer) cands.push(['aim', pocketAim(), 50]);
-  if (S.mode==='free'){ cands.push(['cue', S.cue, 80]); cands.push(['obj', S.obj, 80]); }
-  let best = null;
-  cands.forEach(([k,pt,mm])=>{ const r = dist(p,pt)/hitR(mm); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
-  if (best){ drag2d = best.k; dragOff = {x:best.pt.x-p.x, y:best.pt.y-p.y}; }   // 记下抓取偏移，球不会跳到指尖下
-  else { drag2d='pan'; panStart={x:e.clientX, y:e.clientY, cx0:Z.cx, cy0:Z.cy}; }
-  tapStart = {x:e.clientX, y:e.clientY, p};
-  e.preventDefault();
-});
-svg.addEventListener('pointermove', e=>{
-  if (!pointers2d.has(e.pointerId)) return;
-  pointers2d.set(e.pointerId, {x:e.clientX, y:e.clientY});
-  if (pinchStart && pointers2d.size>=2){
-    const pts=[...pointers2d.values()];
-    const d1 = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
-    Z.scale = clamp(pinchStart.scale0*(d1/(pinchStart.d0||1)), ZOOM_MIN, ZOOM_MAX);
-    applyZoom();
-    e.preventDefault();
-    return;
-  }
-  if (drag2d==='guess'){
-    const p = svgPoint(e);
-    setGuess({x:p.x+dragOff.x, y:p.y+dragOff.y});
-  } else if (drag2d==='aim'){
-    const p0 = svgPoint(e), p = {x:p0.x+dragOff.x, y:p0.y+dragOff.y}, c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
-    setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
-  } else if (drag2d==='cue' || drag2d==='obj'){
-    const p = svgPoint(e);
-    const b = S[drag2d];
-    b.x = clamp(p.x+dragOff.x, -L/2+R, L/2-R);
-    b.y = clamp(p.y+dragOff.y, -W/2+R, W/2-R);
-    /* 防止两球重叠 */
-    const other = drag2d==='cue'?S.obj:S.cue;
-    if (dist(b,other) < 2*R+2){
-      const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
-      b.x = other.x + dx/d*(2*R+2);
-      b.y = other.y + dy/d*(2*R+2);
-    }
-    update();
-  } else if (drag2d==='pan' && panStart){
-    const scalePxPerMm = svg.getBoundingClientRect().width / (BASE_VB.w/Z.scale);
-    Z.cx = panStart.cx0 - (e.clientX-panStart.x)/scalePxPerMm;
-    Z.cy = panStart.cy0 - (e.clientY-panStart.y)/scalePxPerMm;
-    applyZoom();
-  }
-  e.preventDefault();
-});
+/* 台面外的库边区域：点库边 = 设置借库（袋口附近不算） */
 function cushionAt(p){
   const inX = Math.abs(p.x)<=L/2, inY = Math.abs(p.y)<=W/2;
   if (inX && p.y<-W/2 && p.y>-W/2-CUSHION && Math.abs(p.x)>MID_R+NOSE_R) return 'top';
@@ -921,38 +733,12 @@ function cushionAt(p){
   if (inY && p.x> L/2 && p.x< L/2+CUSHION && Math.abs(p.y)<W/2-60) return 'right';
   return null;
 }
-function endPointer2d(e){
-  if (e.type==='pointerup' && tapStart && pointers2d.size===1 && drag2d==='pan' &&
-      Math.hypot(e.clientX-tapStart.x, e.clientY-tapStart.y)<8){
-    if (S.mode==='quiz'){
-      if (Math.abs(tapStart.p.x)<=L/2 && Math.abs(tapStart.p.y)<=W/2) setGuess(tapStart.p);
-    } else {
-      const side = cushionAt(tapStart.p);
-      if (side) setBank(S.bank===side ? null : side);
-    }
-  }
-  tapStart = null;
-  pointers2d.delete(e.pointerId);
-  if (pointers2d.size < 2) pinchStart = null;
-  if (pointers2d.size === 1 && drag2d===null){
-    /* 双指缩放松开一指后，用剩下那根手指继续平移，避免手势断档 */
-    const pt = [...pointers2d.values()][0];
-    panStart = {x:pt.x, y:pt.y, cx0:Z.cx, cy0:Z.cy};
-    drag2d = 'pan';
-  }
-  if (pointers2d.size === 0){ drag2d=null; panStart=null; }
-}
-svg.addEventListener('pointerup', endPointer2d);
-svg.addEventListener('pointercancel', endPointer2d);
-document.getElementById('btnZoomIn').addEventListener('click', ()=>{ Z.scale = clamp(Z.scale*1.6, ZOOM_MIN, ZOOM_MAX); applyZoom(); });
-document.getElementById('btnZoomOut').addEventListener('click', ()=>{ Z.scale = clamp(Z.scale/1.6, ZOOM_MIN, ZOOM_MAX); applyZoom(); });
-document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=1; Z.cx=0; Z.cy=0; applyZoom(); });
 
 /* ================= 3D (three.js) ================= */
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -965,7 +751,7 @@ function setFan3(mesh, tris){
 }
 let camPos, camLook, tPos, tLook, camMode='top';
 /* 缩放：在各机位的基准机位上，沿「机位→视点」方向推近 / 拉远；放大时视点逐渐移向目标球 */
-let zoom3 = 1, basePos = new THREE.Vector3(0,3.6,0.02), baseLook = new THREE.Vector3();
+let zoom3 = 1, basePos = null, baseLook = null;
 const ZOOM3_MIN = 0.5, ZOOM3_MAX = 4;
 function applyZoom3(){
   zoom3 = Math.min(ZOOM3_MAX, Math.max(ZOOM3_MIN, zoom3));
@@ -995,7 +781,7 @@ function init3d(){
   ready3 = true;
   scene3 = new THREE.Scene();
   scene3.background = new THREE.Color(0x0e1014);
-  scene3.fog = new THREE.Fog(0x0e1014, 6, 14);
+  scene3.fog = new THREE.Fog(0x0e1014, 14, 30);
   cam3 = new THREE.PerspectiveCamera(50, wrap3d.clientWidth/wrap3d.clientHeight, 0.01, 50);
   renderer3 = new THREE.WebGLRenderer({antialias:true});
   renderer3.setPixelRatio(QLOW ? 1 : Math.min(devicePixelRatio,2));
@@ -1136,6 +922,18 @@ function init3d(){
   bounceRing3.rotation.x=-Math.PI/2;
   scene3.add(bounceRing3);
   bounceLine3 = dash(0xe05c5c);
+  /* 原先只在 2D 里有的东西，搬到 3D：瞄准点、借库镜像线、测验的你的出杆线 / 误差 / 红球实际走向、加塞的实际触点和走向 */
+  aim3 = new THREE.Mesh(new THREE.CircleGeometry(0.011, 20), new THREE.MeshBasicMaterial({color:0xc9a45c, depthTest:false}));
+  aim3.rotation.x = -Math.PI/2; aim3.renderOrder = 5; scene3.add(aim3);
+  mirrorLine3 = dash(0xc9a45c);
+  qAim3 = dash(0xc9a45c);
+  qErr3 = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]), new THREE.LineBasicMaterial({color:0xe05c5c}));
+  scene3.add(qErr3);
+  qPath3 = dash(0xe05c5c);
+  engPath3 = dash(0x7ad0f5);
+  engCb3 = new THREE.Mesh(new THREE.RingGeometry(Rm*0.9, Rm, 40), new THREE.MeshBasicMaterial({color:0x7ad0f5, side:THREE.DoubleSide, transparent:true, opacity:0.9}));
+  engCb3.rotation.x = -Math.PI/2; scene3.add(engCb3);
+  [aim3, mirrorLine3, qAim3, qErr3, qPath3, engPath3, engCb3].forEach(o=>{ o.visible = false; });
 
   /* 击球训练辅助：瞄准线两侧边线（白球外缘）、接触点、角度弧、球杆 */
   function dashW(){
@@ -1162,7 +960,7 @@ function init3d(){
   camPos=new THREE.Vector3(0,3.6,0.02); camLook=new THREE.Vector3(0,0,0);
   tPos=camPos.clone(); tLook=camLook.clone();
 
-  /* 3D 拖球（上帝视角 + 自由模式） */
+  /* 3D 输入：拖球 / 拖瞄准点 / 拖假想球（测验）/ 点袋口选袋 / 点库边借库 / 滚轮 + 双指缩放 */
   const ray=new THREE.Raycaster(), mv=new THREE.Vector2();
   const plane=new THREE.Plane(new THREE.Vector3(0,1,0), -Rm);
   const tablePlane=new THREE.Plane(new THREE.Vector3(0,1,0), 0);
@@ -1173,7 +971,14 @@ function init3d(){
     mv.y=-((e.clientY-r.top)/r.height)*2+1;
     ray.setFromCamera(mv,cam3);
   }
-  /* 缩放：滚轮 / 双指捏合 */
+  /* 热区半径：至少 mm，且屏幕上不小于 ~22px（手机上球台被缩得很小） */
+  function hitRad(mm, pt){
+    const cw = renderer3.domElement.clientWidth, ch = renderer3.domElement.clientHeight;
+    const a0 = new THREE.Vector3(pt.x*MM, Rm, pt.y*MM).project(cam3);
+    const a1 = new THREE.Vector3(pt.x*MM+0.1, Rm, pt.y*MM).project(cam3);
+    const px100 = Math.hypot((a1.x-a0.x)*cw/2, (a1.y-a0.y)*ch/2) || 1;
+    return Math.max(mm, 22/(px100/100));
+  }
   renderer3.domElement.addEventListener('wheel', e=>{ e.preventDefault(); zoomBy(e.deltaY<0 ? 1.12 : 1/1.12); }, {passive:false});
   const pointers3 = new Map(); let pinch3 = null;
   const pdist = ()=>{ const p=[...pointers3.values()]; return Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y) || 1; };
@@ -1181,31 +986,26 @@ function init3d(){
     pointers3.set(e.pointerId, {x:e.clientX, y:e.clientY});
     if (pointers3.size===2){ drag3 = null; pinch3 = {d0:pdist(), z0:zoom3}; e.preventDefault(); return; }
     if (pointers3.size>2) return;
-    if (Q.on && Q.type==='ghost' && Q.phase==='ask' && camMode==='top'){
-      setRay(e);
-      const qh=new THREE.Vector3();
-      if (ray.ray.intersectPlane(plane,qh)) setGuess({x:qh.x/MM, y:qh.z/MM});
+    setRay(e);
+    const hit = new THREE.Vector3();
+    const pm = ray.ray.intersectPlane(plane,hit) ? {x:hit.x/MM, y:hit.z/MM} : null;
+    /* 测验：点台面放假想球，按住可继续拖动微调 */
+    if (Q.on){
+      if (Q.type==='ghost' && Q.phase==='ask' && camMode==='top' && pm){
+        setGuess(pm); drag3 = 'guess'; dragOff3 = {x:0, y:0}; e.preventDefault();
+      }
       return;
     }
-    if (S.mode==='quiz') return;
-    setRay(e);
-    const hit=new THREE.Vector3();
+    /* 候选：瞄准点 / 白球 / 红球，取离手指最近的 */
     let best = null;
-    /* 拖球（仅自由摆放、非第一人称）：热区至少 90mm 且屏幕上不小于 ~22px；取离手指最近的球 */
-    if (camMode!=='player' && S.mode==='free' && ray.ray.intersectPlane(plane,hit)){
-      const pm={x:hit.x/MM, y:hit.z/MM};
-      const cw3 = renderer3.domElement.clientWidth, ch3 = renderer3.domElement.clientHeight;
-      [['cue',S.cue],['obj',S.obj]].forEach(([k,b])=>{
-        const a0 = new THREE.Vector3(b.x*MM, Rm, b.y*MM).project(cam3);
-        const a1 = new THREE.Vector3(b.x*MM+0.1, Rm, b.y*MM).project(cam3);
-        const pxPer100 = Math.hypot((a1.x-a0.x)*cw3/2, (a1.y-a0.y)*ch3/2) || 1;
-        const rad = Math.max(90, 22/(pxPer100/100));
-        const r = dist(pm,b)/rad;
-        if (r<1 && (!best || r<best.r)) best = {k, r, b};
-      });
-      if (best){ drag3 = best.k; dragOff3 = {x:best.b.x-pm.x, y:best.b.y-pm.y}; e.preventDefault(); return; }
+    if (pm){
+      const cands = [];
+      if (S.showAnswer) cands.push(['aim', pocketAim(), 50]);
+      if (camMode!=='player' && S.mode==='free'){ cands.push(['cue', S.cue, 80]); cands.push(['obj', S.obj, 80]); }
+      cands.forEach(([k,pt,mm])=>{ const r = dist(pm,pt)/hitRad(mm,pt); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
     }
-    /* 没抓到球：点袋口 = 选目标袋（所有非测验模式、所有机位） */
+    if (best){ drag3 = best.k; dragOff3 = {x:best.pt.x-pm.x, y:best.pt.y-pm.y}; e.preventDefault(); return; }
+    /* 没抓到：点袋口 = 选目标袋；点台边 = 设置借库 */
     const th = new THREE.Vector3();
     if (ray.ray.intersectPlane(tablePlane, th)){
       const tp = {x:th.x/MM, y:th.z/MM};
@@ -1214,7 +1014,9 @@ function init3d(){
         const d = Math.min(dist(tp,g.mouthMid), dist(tp,g.drop), dist(tp,POCKETS[i]));
         if (d<pd){ pd = d; pick = i; }
       });
-      if (pick>=0){ selectPocket(pick); e.preventDefault(); }
+      if (pick>=0){ selectPocket(pick); e.preventDefault(); return; }
+      const side = cushionAt(tp);
+      if (side){ setBank(S.bank===side ? null : side); e.preventDefault(); }
     }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
@@ -1224,9 +1026,16 @@ function init3d(){
     setRay(e);
     const hit=new THREE.Vector3();
     if(!ray.ray.intersectPlane(plane,hit)) return;
+    const p = {x:hit.x/MM+dragOff3.x, y:hit.z/MM+dragOff3.y};
+    if (drag3==='guess'){ setGuess(p); e.preventDefault(); return; }
+    if (drag3==='aim'){
+      const c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
+      setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
+      e.preventDefault(); return;
+    }
     const b=S[drag3];
-    b.x=clamp(hit.x/MM+dragOff3.x,-L/2+R,L/2-R);
-    b.y=clamp(hit.z/MM+dragOff3.y,-W/2+R,W/2-R);
+    b.x=clamp(p.x,-L/2+R,L/2-R);
+    b.y=clamp(p.y,-W/2+R,W/2-R);
     const other = drag3==='cue'?S.obj:S.cue;
     if (dist(b,other)<2*R+2){
       const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
@@ -1255,11 +1064,17 @@ function resize3d(){
   cam3.aspect=wrap3d.clientWidth/wrap3d.clientHeight;
   cam3.updateProjectionMatrix();
   renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
+  if (camMode==='top') goTop(true);
 }
-function goTop(){
+/* 上帝视角高度随画面宽高比自适应：保证整张球台（含木框）刚好装进画面 */
+function topHeight(){
+  const t = 2*Math.tan(25*Math.PI/180), a = (cam3 && cam3.aspect) || 1.8;
+  return Math.max(2.35/t, 4.1/(a*t));
+}
+function goTop(quiet){
   camMode='top';
-  basePos = new THREE.Vector3(0,3.6,0.02); baseLook = new THREE.Vector3(0,0,0); applyZoom3();
-  hint('上帝视角：拖动球（自由摆放）· 点袋口选目标袋 · 滚轮 / 双指 / ＋－ 缩放');
+  basePos = new THREE.Vector3(0,topHeight(),0.02); baseLook = new THREE.Vector3(0,0,0); applyZoom3();
+  if (!quiet) hint('上帝视角：拖动球（自由摆放）· 点袋口选目标袋 · 滚轮 / 双指 / ＋－ 缩放');
   setHudMode();
 }
 function setHudMode(){
@@ -1452,6 +1267,11 @@ function updateOverlap(aDeg, sideSign){
 
 /* ================= 击球训练：瞄准线三件套 / 接触点 / 角度弧 / 球杆 / HUD ================= */
 function V3(x,y,z){ return new THREE.Vector3(x*MM, y, z*MM); }
+function setLine3(line, pts, y){
+  line.geometry.setFromPoints(pts.map(q=>new THREE.Vector3(q.x*MM, y, q.y*MM)));
+  if (line.material.isLineDashedMaterial) line.computeLineDistances();
+  line.visible = true;
+}
 function update3dTraining(g){
   const show = S.showAnswer, c = S.cue, o = S.obj;
   /* 球杆方向：显示答案 → 朝假想球；隐藏 → 朝红球（不泄露） */
@@ -1596,56 +1416,10 @@ function update(){
   const potColor = pj.status==='clear' ? 0xc9a45c : (pj.status==='rattle' ? 0xe0a84e : 0xe05c5c);
   const potColorCss = '#'+potColor.toString(16).padStart(6,'0');
 
-  /* 2D */
-  bCue.setAttribute('transform',`translate(${S.cue.x},${S.cue.y})`);
-  bObj.setAttribute('transform',`translate(${S.obj.x},${S.obj.y})`);
-  cGhost.setAttribute('cx',g.x); cGhost.setAttribute('cy',g.y);
-  const route = routePoints();
-  lnOP.setAttribute('points', route.map(v=>v.x+','+v.y).join(' '));
-  lnOP.setAttribute('stroke', potColorCss);
-  lnCG.setAttribute('x1',S.cue.x); lnCG.setAttribute('y1',S.cue.y);
-  lnCG.setAttribute('x2',g.x); lnCG.setAttribute('y2',g.y);
-  gAns.setAttribute('opacity', S.showAnswer?1:0);
-  const pa = pocketAim();
-  aimHandle.setAttribute('transform', `translate(${pa.x},${pa.y})`);
   const fan = potFan();
   const fanOn = S.showFan;
   const fo = fanOn ? fan.outer : null, fi = fanOn ? fan.inner : null;
   const triO = fanTris(fan, fo), triI = fanTris(fan, fi);
-  fanOuter2d.setAttribute('d', trisPath(triO));
-  fanInner2d.setAttribute('d', trisPath(triI));
-  /* 借库高亮 + 镜像袋口 */
-  gMirror.setAttribute('opacity', S.bank?1:0);
-  if (S.bank){
-    const bk = BANKS[S.bank], T = aimTarget(), fc = bk.v + (bk.sign<0?-R:R);   // 库边面坐标
-    if (bk.axis==='y'){ bankFace.setAttribute('x1',-L/2); bankFace.setAttribute('x2',L/2); bankFace.setAttribute('y1',fc); bankFace.setAttribute('y2',fc); }
-    else { bankFace.setAttribute('y1',-W/2); bankFace.setAttribute('y2',W/2); bankFace.setAttribute('x1',fc); bankFace.setAttribute('x2',fc); }
-    mirrorLine.setAttribute('x1',S.obj.x); mirrorLine.setAttribute('y1',S.obj.y);
-    mirrorLine.setAttribute('x2',T.x); mirrorLine.setAttribute('y2',T.y);
-    /* 镜像袋口常在台面外很远处：超出视野就把标签贴到视野边缘，并标出距离 */
-    const dx = T.x-S.obj.x, dy = T.y-S.obj.y, bx = BASE_VB;
-    let tt = 1;
-    if (T.x > bx.x+bx.w-90) tt = Math.min(tt, (bx.x+bx.w-90-S.obj.x)/dx);
-    if (T.x < bx.x+90)      tt = Math.min(tt, (bx.x+90-S.obj.x)/dx);
-    if (T.y > bx.y+bx.h-60) tt = Math.min(tt, (bx.y+bx.h-60-S.obj.y)/dy);
-    if (T.y < bx.y+60)      tt = Math.min(tt, (bx.y+60-S.obj.y)/dy);
-    const lp = {x:S.obj.x+dx*tt, y:S.obj.y+dy*tt}, inView = tt>=1;
-    mirrorHole.setAttribute('cx',T.x); mirrorHole.setAttribute('cy',T.y);
-    mirrorHole.setAttribute('opacity', inView?1:0);
-    mirrorTxt.setAttribute('x', clamp(lp.x, -L/2+330, L/2-330));
-    mirrorTxt.setAttribute('y', inView ? T.y + (T.y<0?-70:90) : lp.y + (lp.y<0 ? 120 : (lp.y>0 ? -80 : 0)));
-    mirrorTxt.textContent = inView ? '镜像袋口' : '镜像袋口（台外 '+(dist(lp,T)/1000).toFixed(1)+' m）';
-  }
-  pkEls.forEach((r,i)=> r.setAttribute('opacity', i===S.pk?1:0));
-  if (pj.status==='clear' || !pj.hits.length){
-    gBounce.setAttribute('opacity',0);
-  } else {
-    gBounce.setAttribute('opacity',1);
-    const h0 = pj.hits[0];
-    bounceNoseRing.setAttribute('cx', h0.nose.c.x); bounceNoseRing.setAttribute('cy', h0.nose.c.y);
-    bounceHit.setAttribute('cx', h0.pos.x); bounceHit.setAttribute('cy', h0.pos.y);
-    bouncePath.setAttribute('points', pj.pts.slice(pj.pts.indexOf(h0.pos)).map(v=>v.x+','+v.y).join(' '));
-  }
 
   /* 3D */
   if (ready3){
@@ -1655,6 +1429,11 @@ function update(){
     ghostRing3.position.set(g.x*MM, 0.0035, g.y*MM);
     const dp = POCKET_GEO[S.pk].drop;
     ball3.target.position.set(dp.x*MM, 0.004, dp.y*MM);
+    const pa = pocketAim();
+    aim3.visible = S.showAnswer && S.mode!=='quiz';
+    aim3.position.set(pa.x*MM, 0.006, pa.y*MM);
+    mirrorLine3.visible = S.showAnswer && !!S.bank;
+    if (S.bank){ setLine3(mirrorLine3, [S.obj, aimTarget()], 0.003); mirrorLine3.visible = S.showAnswer; }
     lnOP3.geometry.setFromPoints(routePoints().map(q=>new THREE.Vector3(q.x*MM, 0.003, q.y*MM)));
     lnOP3.computeLineDistances();
     lnOP3.material.color.set(potColor);
@@ -1691,8 +1470,8 @@ function update(){
 
   /* 击球训练 HUD（3D 视图 + 显示答案时） */
   const hud = document.getElementById('hud3');
-  hud.style.display = (S.view==='3d' && S.showAnswer) ? 'block' : 'none';
-  if (S.view==='3d' && S.showAnswer){
+  hud.style.display = S.showAnswer ? 'block' : 'none';
+  if (S.showAnswer){
     document.getElementById('hAng').textContent = a.toFixed(1)+'°';
     document.getElementById('hShift').textContent = (2*R*Math.sin(Math.min(a,90)*Math.PI/180)).toFixed(1)+' mm';
     document.getElementById('hThick').textContent = thickText(a);
@@ -1789,8 +1568,8 @@ function setOvDetail(on){
 })();
 
 function startQuiz(){
-  if (S.view!=='2d') document.querySelector('#segView button[data-v="2d"]').click();
   Q.on = true;
+  if (ready3 && camMode!=='top'){ zoom3 = 1; goTop(); }      // 点台面放球只在上帝视角下可用
   newQuestion();
 }
 function newQuestion(){
@@ -1873,20 +1652,14 @@ function quizUI(){
   }
 }
 function updateQuizLayer(){
+  if (!ready3) return;
   const G = Q.on && Q.type==='ghost' ? Q.guess : null, res = Q.res;
-  gQuiz.setAttribute('opacity', G ? 1 : 0);
+  qAim3.visible = qErr3.visible = qPath3.visible = false;
   if (!G) return;
-  qGuess.setAttribute('cx',G.x); qGuess.setAttribute('cy',G.y);
-  qDot.setAttribute('cx',G.x); qDot.setAttribute('cy',G.y);
-  qAim.setAttribute('x1',S.cue.x); qAim.setAttribute('y1',S.cue.y);
-  qAim.setAttribute('x2',G.x); qAim.setAttribute('y2',G.y);
-  const showRes = Q.phase==='result' && res && res.type==='ghost';
-  const gp = ghostPos();
-  qErr.setAttribute('opacity', showRes?1:0);
-  qPath.setAttribute('opacity', showRes && !res.miss ? 1 : 0);
-  if (showRes){
-    qErr.setAttribute('x1',G.x); qErr.setAttribute('y1',G.y); qErr.setAttribute('x2',gp.x); qErr.setAttribute('y2',gp.y);
-    if (!res.miss) qPath.setAttribute('points', res.pts.map(v=>v.x+','+v.y).join(' '));
+  setLine3(qAim3, [S.cue, G], 0.004);
+  if (Q.phase==='result' && res && res.type==='ghost'){
+    setLine3(qErr3, [G, ghostPos()], 0.006);
+    if (!res.miss && res.pts.length>1) setLine3(qPath3, res.pts, 0.005);
   }
 }
 document.getElementById('segQuiz').addEventListener('click', e=>{
@@ -1964,7 +1737,7 @@ const NUDGE = {src:{key:0, btn:0}, dir:0, fine:false, t0:0, last:0, raf:0};
 function nudgeMm(mm){
   if (S.mode!=='free' && S.mode!=='random') return;
   let rx = 1, ry = 0;
-  if (S.view==='3d' && camMode!=='top'){
+  if (camMode!=='top'){
     const ref = S.showAnswer ? ghostPos() : S.obj;
     const dx = ref.x-S.cue.x, dy = ref.y-S.cue.y, l = Math.hypot(dx,dy)||1;
     rx = -dy/l; ry = dx/l;
@@ -2087,7 +1860,7 @@ function updateEnglish(){
   const tips = Math.abs(e.b)/TIP_D;
   let h = `击球点：${Math.abs(e.b)<0.05?'中杆':(e.b>0?'右 ':'左 ')+Math.abs(e.b).toFixed(1)+' mm（'+tips.toFixed(2)+' 个杆头）'}`;
   h += `<br>旋转比 ωR/v = ${r.rho.toFixed(2)}${e.b>0?'（右塞，俯视逆时针）':e.b<0?'（左塞，俯视顺时针）':''}`;
-  if (!S.showAnswer){ h += '<br>红球方向 / 袋口偏差：？'; out.innerHTML = h; engCb.setAttribute('opacity',0); engPath.setAttribute('opacity',0); return; }
+  if (!S.showAnswer){ h += '<br>红球方向 / 袋口偏差：？'; out.innerHTML = h; if (ready3){ engCb3.visible = engPath3.visible = false; } return; }
   if (r.miss){ h += '<br><b style="color:var(--hard)">白球擦不到红球</b>（路线偏移太大）'; }
   else if (!r.active){ h += '<br>未填 δ 和 μ：红球方向 = 理想方向（加塞对红球的影响需要你的实测值）。'; }
   else {
@@ -2096,10 +1869,12 @@ function updateEnglish(){
   }
   out.innerHTML = h;
   const show = r.active && !r.miss;
-  engCb.setAttribute('opacity', show?1:0); engPath.setAttribute('opacity', show?1:0);
-  if (show){
-    engCb.setAttribute('cx', r.ct.x); engCb.setAttribute('cy', r.ct.y);
-    engPath.setAttribute('points', r.pts.map(v=>v.x+','+v.y).join(' '));
+  if (ready3){
+    engCb3.visible = engPath3.visible = show;
+    if (show){
+      engCb3.position.set(r.ct.x*MM, 0.005, r.ct.y*MM);
+      setLine3(engPath3, r.pts, 0.007);
+    }
   }
 }
 /* 击球点小图：圆 = 白球正面，拖动圆点设置击球点 */
@@ -2202,7 +1977,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v16');
+    add('版本缓存', 'v18');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2221,9 +1996,8 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     add('画质', QLOW?'低':'高');
     show();
     /* 3D 帧率：切到 3D 第三人称，静止 1.5s 后量 3s */
-    const prevView = S.view;
+    const prevCam = camMode;
     try{
-      if (prevView!=='3d') document.querySelector('#segView button[data-v="3d"]').click();
       goThird(true);
       await new Promise(r=>setTimeout(r,1500));
       const ts = [];
@@ -2239,24 +2013,13 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
       add('3D 帧率', `平均 ${(1000/avg).toFixed(0)} fps · 95% 帧耗时 ${p95.toFixed(0)} ms · 最慢 ${d[d.length-1].toFixed(0)} ms`);
       add('3D 评价', avg<=22 ? '流畅' : avg<=33 ? '可用（偏卡，可试低画质）' : '较卡，建议切到低画质');
     }catch(e){ add('3D 帧率','失败 '+e.message); }
-    if (prevView!=='3d') document.querySelector('#segView button[data-v="2d"]').click();
+    if (prevCam==='top') goTop(); else if (prevCam==='player') goPlayer(true);
     show();
     btn.disabled = false; btn.textContent = '重新检测';
   });
 })();
 
 /* ================= UI 事件 ================= */
-document.getElementById('segView').addEventListener('click', e=>{
-  const b = e.target.closest('button'); if(!b) return;
-  document.querySelectorAll('#segView button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on');
-  S.view = b.dataset.v;
-  document.getElementById('wrap2d').style.display = S.view==='2d'?'':'none';
-  document.getElementById('wrap3d').style.display = S.view==='3d'?'block':'none';
-  document.getElementById('zoomBtns').style.display = S.view==='2d'?'':'none';
-  if (S.view==='3d'){ init3d(); resize3d(); goTop(); update(); }
-  else hint(S.mode==='free'?'拖动白球 / 红球 · 点击袋口选择目标袋':'点「换一题」生成新球形');
-});
 document.getElementById('segMode').addEventListener('click', e=>{
   const b = e.target.closest('button'); if(!b) return;
   document.querySelectorAll('#segMode button').forEach(x=>x.classList.remove('on'));
@@ -2324,6 +2087,14 @@ document.getElementById('btnTop').addEventListener('click', ()=>{ zoom3 = 1; goT
 document.getElementById('btnPlayer').addEventListener('click', ()=>{ zoom3 = 1; goPlayer(); });
 document.getElementById('btnThird').addEventListener('click', ()=>{ zoom3 = 1; goThird(); });
 
+/* 只有 3D：启动即初始化；WebGL 不可用时给出提示 */
+try{
+  init3d(); resize3d(); goTop();
+  camPos.copy(tPos); camLook.copy(tLook);          // 首次直接就位，不从远处飘过来
+}catch(err){
+  ready3 = false;
+  wrap3d.insertAdjacentHTML('beforeend','<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#e05c5c;z-index:9;">此设备 / 浏览器无法使用 3D（WebGL 不可用）。请换用最新版 Chrome 或 Safari。</div>');
+}
 syncNudge();
 update();
 </script>
