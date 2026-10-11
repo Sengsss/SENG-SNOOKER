@@ -69,6 +69,14 @@
   .stbl th{color:var(--muted); font-weight:500;}
   .sec-t{color:var(--brass); font-size:14px; margin-top:6px;}
   .tip{font-size:13px; line-height:1.7; color:var(--text); background:var(--panel2); border-radius:8px; padding:8px 10px; margin-bottom:8px;}
+  .foot-tools{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
+  .cal-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:8px 0;}
+  .cal-grid label{display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted);}
+  .cal-grid input{background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px; padding:10px; font-size:16px; font-family:inherit;}
+  .modal-foot{display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;}
+  .touchpad{border:2px dashed var(--brass-dim); border-radius:10px; padding:18px 10px; text-align:center; font-size:13px; color:var(--muted); margin:8px 0; touch-action:none; user-select:none; -webkit-user-select:none;}
+  .touchpad.on{border-color:var(--good); color:var(--text);}
+  .diagout{background:#12100d; border:1px solid #3a342a; border-radius:8px; padding:10px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; max-height:260px; overflow:auto; color:var(--text);}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
   #wrap2d, #wrap3d{
@@ -271,7 +279,45 @@
   白色虚线圆 = 假想球（瞄准点），金色虚线 = 红球进袋线，蓝色虚线 = 出杆线。<br>
   <b>叠球图</b>：红球按 1/8 等分刻度划分，金色高亮 = 白球覆盖面积，下方刻度尺直接读出覆盖量（如 5/8）。满球 0° · 3/4 球 14.5° · 1/2 球 30° · 1/4 球 48.6°（厚度 = 1 − sin 切角）。
   3D 击球视角模拟趴下瞄准时约 28cm 的视线高度——注意同一切角在俯视和低视角下的巨大差异。
+  <div class="foot-tools">
+    <button class="btn" id="btnCal">⚙ 校准袋口</button>
+    <button class="btn" id="btnDiag">📱 手机自检</button>
+  </div>
 </footer>
+
+<div class="modal" id="calModal" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head"><b>袋口校准</b><button class="btn" id="btnCalClose">关闭 ✕</button></div>
+    <div class="tip">WPBSA 只规定袋口必须符合它授权的模板，<b>并不公布毫米数</b>，所以默认的 86 / 104mm 只是常见近似值。
+      最可靠的办法是量你常打的那张桌。<br>
+      <b>怎么量</b>：用卷尺量袋口两个「鼻尖」（库边末端最突出的圆角）之间的直线距离——角袋斜着量，中袋横着量。多量几个袋口取平均。</div>
+    <div class="cal-grid">
+      <label>角袋口宽 (mm)<input type="number" id="calCorner" step="0.5" inputmode="decimal"></label>
+      <label>中袋口宽 (mm)<input type="number" id="calMid" step="0.5" inputmode="decimal"></label>
+      <label>鼻圆半径 (mm)<input type="number" id="calNose" step="0.5" inputmode="decimal"></label>
+    </div>
+    <div class="tip" id="calInfo"></div>
+    <div class="modal-foot">
+      <button class="btn" id="btnCalReset">恢复默认</button>
+      <button class="btn primary" id="btnCalSave">保存并重新载入</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="diagModal" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head"><b>手机自检</b><button class="btn" id="btnDiagClose">关闭 ✕</button></div>
+    <div class="tip">在手机上点「开始检测」：它会读设备信息，并在 3D 里跑 3 秒测帧率。下面的触控区用 1 指 / 2 指按一按。
+      测完点「复制结果」，把内容发给我就行。</div>
+    <div id="touchPad" class="touchpad">触控测试区：用 1 指、2 指、3 指按住这里<br><span id="touchInfo">尚未触摸</span></div>
+    <pre id="diagOut" class="diagout">尚未检测</pre>
+    <div class="modal-foot">
+      <button class="btn" id="btnDiagQ">画质：高</button>
+      <button class="btn" id="btnDiagCopy">复制结果</button>
+      <button class="btn primary" id="btnDiagRun">开始检测</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -285,7 +331,27 @@ if ('serviceWorker' in navigator){
 /* ================= 真实规格（毫米） ================= */
 const L = 3569, W = 1778;          // 台面（cushion face 之间）
 const R = 26.25;                    // 球半径 52.5mm
-const CORNER_R = 43, MID_R = 52;    // 角袋≈86mm 中袋≈104mm（近似 WPBSA 模板）
+/* 袋口校准：WPBSA 只规定袋口须符合其授权模板，并不公布毫米数，所以 86 / 104 只是常见近似值。
+   这里读取用户在「⚙ 校准袋口」里保存的实测值（localStorage），保存后重新载入生效。
+   口宽 = 两个袋口鼻尖之间的净距（卷尺直接量得到的那个数）。 */
+const CAL_KEY = 'snooker-cal-v1', CAL_DEF = {corner:86, mid:104, nose:12};
+const CAL_LIM = {corner:[60,120], mid:[70,140], nose:[6,16]};
+function loadCal(){
+  try{
+    const v = JSON.parse(localStorage.getItem(CAL_KEY)||'null');
+    if (v){
+      const o = {};
+      for (const k in CAL_DEF){
+        const n = Number(v[k]);
+        o[k] = isFinite(n) ? Math.min(CAL_LIM[k][1], Math.max(CAL_LIM[k][0], n)) : CAL_DEF[k];
+      }
+      return o;
+    }
+  }catch(e){}
+  return Object.assign({}, CAL_DEF);
+}
+const CAL = loadCal();
+const CORNER_R = CAL.corner/2, MID_R = CAL.mid/2;    // 半口宽
 const BAULK = 737;                  // baulk line 距底库
 const D_R = 292;                    // D 区半径
 const CUSHION = 95;                 // 库边视觉宽度
@@ -303,12 +369,12 @@ const POCKETS = [
 /* ====== 袋口几何（2D / 3D / 进袋判定共用的唯一数据源） ======
    每个袋口有两只「鼻」：圆心在库边面后方 NOSE_R 处（圆与库边面相切），
    半径 NOSE_R；鼻后接一段「喉道斜面」（胶囊：线段 + 半径 NOSE_R）向袋内延伸。
-   - 角袋：两鼻圆之间净距 = 2*CORNER_R = 86mm；喉道沿台角 45° 对角线直通，
+   - 角袋：两鼻圆之间净距 = 2*CORNER_R（默认 86mm）；喉道沿台角 45° 对角线直通，
      所以斜着进袋的球会擦喉壁（这就是角袋"袋口变小"的来源）。
-   - 中袋：两鼻圆之间净距 = 2*MID_R = 104mm；喉道几乎垂直库边，只外张 MID_FLARE。
+   - 中袋：两鼻圆之间净距 = 2*MID_R（默认 104mm）；喉道几乎垂直库边，只外张 MID_FLARE。
    球心的有效通道 = 净距 − 2R（角袋 ≈33.5mm，中袋 ≈51.5mm）。
    axis = 由台面指向袋内的单位向量；球心越过「鼻圆心连线」再深入 DROP_DEPTH 视为落袋。 */
-const NOSE_R = 12;          // 袋口鼻圆角半径（10-13mm 规格区间取中值）
+const NOSE_R = CAL.nose;    // 袋口鼻圆角半径（默认 12mm，可校准）
 const JAW_LEN = 80;         // 喉道斜面长度
 const MID_FLARE = 12 * Math.PI/180;   // 中袋喉道外张角
 const CORNER_FLARE = 25 * Math.PI/180; // 角袋喉道相对对角线的外张角（鼻后袋腔变宽）
@@ -317,7 +383,7 @@ const DROP_DEPTH = 45;      // 球心越过鼻圆心连线多深算落袋
 function buildPocketGeo(p){
   const r = NOSE_R, ax = {x:0,y:0};
   let A, B, dirA, dirB, backA, backB;
-  if (p.r === CORNER_R){
+  if (p.x !== 0){          // 角袋（中袋 x = 0）
     const sx = Math.sign(p.x), sy = Math.sign(p.y);
     const d = (2*CORNER_R + 2*r)/Math.SQRT2 - r;   // 鼻圆心沿库边距台角
     A = {x:p.x - sx*d, y:p.y + sy*r};               // 长库上的鼻
@@ -346,7 +412,7 @@ function buildPocketGeo(p){
     wall:{x:n.c.x+n.back.x*CUSHION_PROBE, y:n.c.y+n.back.y*CUSHION_PROBE}
   }));
   return {
-    corner: p.r === CORNER_R, axis:ax, mouthMid, mouthDir, noses,
+    corner: p.x !== 0, axis:ax, mouthMid, mouthDir, noses,
     dropProj: mouthMid.x*ax.x + mouthMid.y*ax.y + DROP_DEPTH,
     drop: {x:mouthMid.x + ax.x*DROP_DEPTH, y:mouthMid.y + ax.y*DROP_DEPTH},
   };
@@ -851,6 +917,18 @@ function setFan3(mesh, tris){
   mesh.geometry = g; mesh.visible = true;
 }
 let camPos, camLook, tPos, tLook, camMode='top';
+/* 画质：低画质 = 关阴影 + 像素比 1（旧手机帧率不够时用） */
+let QLOW = false;
+try{ QLOW = localStorage.getItem('snooker-q')==='low'; }catch(e){}
+function setQuality(low){
+  QLOW = !!low;
+  try{ localStorage.setItem('snooker-q', QLOW?'low':'high'); }catch(e){}
+  if (!ready3) return;
+  renderer3.setPixelRatio(QLOW ? 1 : Math.min(devicePixelRatio,2));
+  renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
+  renderer3.shadowMap.enabled = !QLOW;
+  scene3.traverse(o=>{ if (o.material) [].concat(o.material).forEach(m=>{ m.needsUpdate = true; }); });
+}
 
 function init3d(){
   if (ready3) return;
@@ -860,10 +938,10 @@ function init3d(){
   scene3.fog = new THREE.Fog(0x0e1014, 6, 14);
   cam3 = new THREE.PerspectiveCamera(50, wrap3d.clientWidth/wrap3d.clientHeight, 0.01, 50);
   renderer3 = new THREE.WebGLRenderer({antialias:true});
-  renderer3.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer3.setPixelRatio(QLOW ? 1 : Math.min(devicePixelRatio,2));
   renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
   renderer3.domElement.style.touchAction='none';
-  renderer3.shadowMap.enabled = true;
+  renderer3.shadowMap.enabled = !QLOW;
   renderer3.shadowMap.type = THREE.PCFSoftShadowMap;
   wrap3d.appendChild(renderer3.domElement);
 
@@ -1843,6 +1921,116 @@ window.addEventListener('keydown', e=>{
   ['pointerup','pointercancel','lostpointercapture'].forEach(ev=> btn.addEventListener(ev, stop));
   btn.addEventListener('contextmenu', e=>e.preventDefault());
 });
+
+/* ================= 校准袋口 ================= */
+(function(){
+  const $ = id=>document.getElementById(id);
+  const modal = $('calModal'), ic = $('calCorner'), im = $('calMid'), inn = $('calNose'), info = $('calInfo');
+  function refresh(){
+    const c = +ic.value, m = +im.value, n = +inn.value, d = 2*R;
+    const bad = [];
+    [['corner',c,'角袋口宽'],['mid',m,'中袋口宽'],['nose',n,'鼻圆半径']].forEach(([k,v,name])=>{
+      if (!isFinite(v) || v<CAL_LIM[k][0] || v>CAL_LIM[k][1]) bad.push(`${name}应在 ${CAL_LIM[k][0]}–${CAL_LIM[k][1]} mm`);
+    });
+    if (bad.length){ info.innerHTML = '⚠ '+bad.join('；'); info.dataset.bad = '1'; return; }
+    info.dataset.bad = '';
+    info.innerHTML = `球径 ${d} mm。正对袋口时球心可通过的宽度（口宽 − 球径）：<b>角袋 ${(c-d).toFixed(1)} mm</b>，<b>中袋 ${(m-d).toFixed(1)} mm</b>。`+
+      `这个数越小，进袋窗口越窄。当前生效：角袋 ${CAL.corner} / 中袋 ${CAL.mid} / 鼻圆 ${CAL.nose}。`;
+  }
+  $('btnCal').addEventListener('click', ()=>{
+    ic.value = CAL.corner; im.value = CAL.mid; inn.value = CAL.nose;
+    refresh(); modal.style.display = 'flex';
+  });
+  [ic,im,inn].forEach(i=> i.addEventListener('input', refresh));
+  $('btnCalClose').addEventListener('click', ()=>{ modal.style.display='none'; });
+  modal.addEventListener('click', e=>{ if (e.target===modal) modal.style.display='none'; });
+  $('btnCalReset').addEventListener('click', ()=>{ ic.value = CAL_DEF.corner; im.value = CAL_DEF.mid; inn.value = CAL_DEF.nose; refresh(); });
+  $('btnCalSave').addEventListener('click', ()=>{
+    refresh();
+    if (info.dataset.bad) return;
+    try{ localStorage.setItem(CAL_KEY, JSON.stringify({corner:+ic.value, mid:+im.value, nose:+inn.value})); }
+    catch(e){ info.innerHTML = '⚠ 这个浏览器不允许保存设置（隐私模式？）'; return; }
+    location.reload();
+  });
+})();
+
+/* ================= 手机自检 ================= */
+(function(){
+  const $ = id=>document.getElementById(id);
+  const modal = $('diagModal'), out = $('diagOut');
+  let lines = [], touchLine = '触控测试：未做';
+  function show(){ out.textContent = lines.concat([touchLine]).join('\n'); }
+  /* 触控测试区：记录最多同时几指、指针类型 */
+  const pad = $('touchPad'), tinfo = $('touchInfo');
+  const act = new Map(); let maxN = 0; const types = new Set();
+  function tp(e){
+    if (e.type==='pointerdown'){ act.set(e.pointerId, 1); types.add(e.pointerType); try{ pad.setPointerCapture(e.pointerId); }catch(x){} }
+    else if (e.type==='pointerup' || e.type==='pointercancel') act.delete(e.pointerId);
+    maxN = Math.max(maxN, act.size);
+    pad.classList.toggle('on', act.size>0);
+    tinfo.textContent = `当前 ${act.size} 指 · 最多同时 ${maxN} 指 · 类型 ${[...types].join('/')||'-'}`;
+    touchLine = `触控测试：最多同时 ${maxN} 指，指针类型 ${[...types].join('/')||'-'}`;
+    show();
+    e.preventDefault();
+  }
+  ['pointerdown','pointermove','pointerup','pointercancel'].forEach(t=> pad.addEventListener(t, tp));
+  function q(){ $('btnDiagQ').textContent = '画质：'+(QLOW?'低（关阴影）':'高'); }
+  $('btnDiagQ').addEventListener('click', ()=>{ setQuality(!QLOW); q(); });
+  $('btnDiag').addEventListener('click', ()=>{ q(); modal.style.display='flex'; show(); });
+  $('btnDiagClose').addEventListener('click', ()=>{ modal.style.display='none'; });
+  $('btnDiagCopy').addEventListener('click', async ()=>{
+    const t = out.textContent;
+    try{ await navigator.clipboard.writeText(t); $('btnDiagCopy').textContent = '已复制 ✓'; }
+    catch(e){ const r = document.createRange(); r.selectNodeContents(out); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $('btnDiagCopy').textContent = '已选中，请手动复制'; }
+    setTimeout(()=>{ $('btnDiagCopy').textContent = '复制结果'; }, 2500);
+  });
+  $('btnDiagRun').addEventListener('click', async ()=>{
+    const btn = $('btnDiagRun'); btn.disabled = true; btn.textContent = '检测中…';
+    lines = [];
+    const add = (k,v)=> lines.push(k+'：'+v);
+    add('时间', new Date().toLocaleString());
+    add('版本缓存', 'v12');
+    add('UA', navigator.userAgent);
+    add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
+    add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
+    try{
+      const c = document.createElement('canvas'), gl = c.getContext('webgl');
+      if (!gl) add('WebGL','不可用');
+      else { const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        add('WebGL', ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '可用（读不到显卡名）'); add('最大纹理', gl.getParameter(gl.MAX_TEXTURE_SIZE)); }
+    }catch(e){ add('WebGL','出错 '+e.message); }
+    try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); add('localStorage','可用'); }catch(e){ add('localStorage','不可用'); }
+    try{
+      add('Service Worker', 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? '已接管（可离线）' : '已支持，尚未接管（刷新一次再测）') : '不支持（需 HTTPS 或 localhost）');
+      if (window.caches) add('离线缓存', (await caches.keys()).join(', ') || '无');
+    }catch(e){ add('离线缓存','读取失败'); }
+    add('校准', `角袋 ${CAL.corner} / 中袋 ${CAL.mid} / 鼻圆 ${CAL.nose} mm`);
+    add('画质', QLOW?'低':'高');
+    show();
+    /* 3D 帧率：切到 3D 第三人称，静止 1.5s 后量 3s */
+    const prevView = S.view;
+    try{
+      if (prevView!=='3d') document.querySelector('#segView button[data-v="3d"]').click();
+      goThird(true);
+      await new Promise(r=>setTimeout(r,1500));
+      const ts = [];
+      await new Promise(res=>{
+        const t0 = performance.now();
+        const guard = setTimeout(res, 6000);                 // 页面在后台时 rAF 不会触发，别一直卡在「检测中」
+        (function f(t){ ts.push(t); if (t-t0<3000) requestAnimationFrame(f); else { clearTimeout(guard); res(); } })(t0);
+      });
+      if (ts.length<20) throw new Error('页面不在前台，帧率没测到（请保持页面在最前面再测）');
+      const d = []; for (let i=1;i<ts.length;i++) d.push(ts[i]-ts[i-1]);
+      d.sort((a,b)=>a-b);
+      const avg = d.reduce((a,b)=>a+b,0)/d.length, p95 = d[Math.floor(d.length*0.95)]||avg;
+      add('3D 帧率', `平均 ${(1000/avg).toFixed(0)} fps · 95% 帧耗时 ${p95.toFixed(0)} ms · 最慢 ${d[d.length-1].toFixed(0)} ms`);
+      add('3D 评价', avg<=22 ? '流畅' : avg<=33 ? '可用（偏卡，可试低画质）' : '较卡，建议切到低画质');
+    }catch(e){ add('3D 帧率','失败 '+e.message); }
+    if (prevView!=='3d') document.querySelector('#segView button[data-v="2d"]').click();
+    show();
+    btn.disabled = false; btn.textContent = '重新检测';
+  });
+})();
 
 /* ================= UI 事件 ================= */
 document.getElementById('segView').addEventListener('click', e=>{
