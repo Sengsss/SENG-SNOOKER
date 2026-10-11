@@ -68,6 +68,9 @@
   }
   .overlap-card{display:flex; flex-direction:column;}
   .overlap-card svg{width:100%; flex:1; display:block;}
+  .overlap-card.masked svg, .overlap-card.masked .ov-label{visibility:hidden;}
+  .overlap-card.masked{position:relative;}
+  .overlap-card.masked::after{content:'答案已隐藏'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px;}
   .ov-label{display:flex; align-items:baseline; gap:10px; margin-top:6px;}
   .ov-label #ovFrac{font-size:24px; font-weight:700; color:var(--brass);}
   .ov-std{font-size:12px; color:var(--muted);}
@@ -894,7 +897,8 @@ function goPlayer(){
   camMode='player';
   const g=ghostPos();
   const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM);
-  const gv=new THREE.Vector3(g.x*MM, R*MM, g.y*MM);
+  /* 隐藏答案时镜头只朝向红球，不能沿「白球→假想球」方向架机位，否则等于泄露瞄准线 */
+  const gv = S.showAnswer ? new THREE.Vector3(g.x*MM, R*MM, g.y*MM) : new THREE.Vector3(S.obj.x*MM, R*MM, S.obj.y*MM);
   const back=c.clone().sub(gv).setY(0).normalize();
   tPos=c.clone().add(back.multiplyScalar(0.5)); tPos.y=0.28;
   tLook=gv.clone();
@@ -1178,6 +1182,16 @@ function update(){
     ? (fan.inner.hi-fan.inner.lo)*180/Math.PI < 0.05 ? '几乎为 0'
       : ((fan.inner.hi-fan.inner.lo)*180/Math.PI).toFixed(1)+'° · 袋口处 ≈'+Math.round(fan.widthMm)+'mm'
     : '无直进角度';
+
+  /* 隐藏答案：凡是能反推假想球 / 切角 / 能否进袋的读数一律遮住，只留红球行程 */
+  const ovCard = document.querySelector('.overlap-card');
+  ovCard.classList.toggle('masked', !S.showAnswer);
+  if (!S.showAnswer){
+    ['angVal','fullVal','cueDistVal','sideVal','diffVal','potVal','fanVal'].forEach(id=>{
+      const e = document.getElementById(id);
+      e.textContent = '？'; e.classList.remove('easy','mid','hard');
+    });
+  }
 }
 
 /* ================= UI 事件 ================= */
@@ -1207,6 +1221,7 @@ document.getElementById('btnAnswer').addEventListener('click', function(){
   S.showAnswer = !S.showAnswer;
   this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
   update();
+  if (camMode==='player' && ready3) goPlayer();
 });
 function setBank(v){
   S.bank = v || null;
