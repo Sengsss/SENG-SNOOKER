@@ -190,21 +190,50 @@ const POCKETS = [
   {x: L/2, y: W/2, r:CORNER_R, name:'顶右角袋'},
 ];
 
-/* 袋口鼻（jaw nose）几何：每个袋口两侧库边末端的圆角落点。
-   角袋：鼻点分别落在两条库边上，距真实台角 s = CORNER_R*√2，
-   使两鼻间直线距离 = 2*CORNER_R ≈ 86mm；中袋：鼻点在同一条库边上，
-   距袋口中心 ±MID_R，两鼻间距 = 2*MID_R ≈ 104mm。2D / 3D 共用此结构。 */
-const NOSE_R = 12; // 袋口鼻圆角半径（10-13mm 规格区间取中值）
-function pocketNoses(){
-  return POCKETS.map(p=>{
-    if (p.r === CORNER_R){
-      const sx = Math.sign(p.x), sy = Math.sign(p.y), s = p.r*Math.SQRT2;
-      return { corner:true, h:{x:p.x-sx*s, y:p.y}, v:{x:p.x, y:p.y-sy*s} };
-    }
-    return { corner:false, l:{x:-p.r, y:p.y}, r:{x:p.r, y:p.y} };
-  });
+/* ====== 袋口几何（2D / 3D / 进袋判定共用的唯一数据源） ======
+   每个袋口有两只「鼻」：圆心在库边面后方 NOSE_R 处（圆与库边面相切），
+   半径 NOSE_R；鼻后接一段「喉道斜面」（胶囊：线段 + 半径 NOSE_R）向袋内延伸。
+   - 角袋：两鼻圆之间净距 = 2*CORNER_R = 86mm；喉道沿台角 45° 对角线直通，
+     所以斜着进袋的球会擦喉壁（这就是角袋"袋口变小"的来源）。
+   - 中袋：两鼻圆之间净距 = 2*MID_R = 104mm；喉道几乎垂直库边，只外张 MID_FLARE。
+   球心的有效通道 = 净距 − 2R（角袋 ≈33.5mm，中袋 ≈51.5mm）。
+   axis = 由台面指向袋内的单位向量；球心越过「鼻圆心连线」再深入 DROP_DEPTH 视为落袋。 */
+const NOSE_R = 12;          // 袋口鼻圆角半径（10-13mm 规格区间取中值）
+const JAW_LEN = 80;         // 喉道斜面长度
+const MID_FLARE = 12 * Math.PI/180;   // 中袋喉道外张角
+const DROP_DEPTH = 45;      // 球心越过鼻圆心连线多深算落袋
+function buildPocketGeo(p){
+  const r = NOSE_R, ax = {x:0,y:0};
+  let A, B, dirA, dirB;
+  if (p.r === CORNER_R){
+    const sx = Math.sign(p.x), sy = Math.sign(p.y);
+    const d = (2*CORNER_R + 2*r)/Math.SQRT2 - r;   // 鼻圆心沿库边距台角
+    A = {x:p.x - sx*d, y:p.y + sy*r};               // 长库上的鼻
+    B = {x:p.x + sx*r, y:p.y - sy*d};               // 短库上的鼻
+    ax.x = sx/Math.SQRT2; ax.y = sy/Math.SQRT2;
+    dirA = dirB = {x:ax.x, y:ax.y};
+  } else {
+    const sy = Math.sign(p.y), m = MID_R + r;
+    A = {x:-m, y:p.y + sy*r}; B = {x:m, y:p.y + sy*r};
+    ax.y = sy;
+    const f = MID_FLARE;
+    dirA = {x:-Math.sin(f), y:sy*Math.cos(f)};
+    dirB = {x: Math.sin(f), y:sy*Math.cos(f)};
+  }
+  const mouthMid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  const noses = [{c:A, dir:dirA}, {c:B, dir:dirB}].map(n=>({
+    c:n.c, dir:n.dir, end:{x:n.c.x+n.dir.x*JAW_LEN, y:n.c.y+n.dir.y*JAW_LEN}
+  }));
+  return {
+    corner: p.r === CORNER_R, axis:ax, mouthMid, noses,
+    dropProj: mouthMid.x*ax.x + mouthMid.y*ax.y + DROP_DEPTH,
+    drop: {x:mouthMid.x + ax.x*DROP_DEPTH, y:mouthMid.y + ax.y*DROP_DEPTH},
+  };
 }
-const NOSES = pocketNoses();
+const POCKET_GEO = POCKETS.map(buildPocketGeo);
+/* 供库边分段引用：corner → h(长库鼻) / v(短库鼻)；mid → l / r */
+const NOSES = POCKET_GEO.map(g => g.corner ? {corner:true, h:g.noses[0].c, v:g.noses[1].c}
+                                           : {corner:false, l:g.noses[0].c, r:g.noses[1].c});
 /* 6 段独立库边（2 短库 + 4 条长库半段），每段两端为袋口鼻点 */
 const CUSHIONS = [
   {side:'y', y:-W/2, x1:NOSES[0].h.x, x2:NOSES[1].l.x, sign:-1},
@@ -253,46 +282,72 @@ function cutAngle(){
   return Math.acos(cos)*180/Math.PI;
 }
 
-/* 进袋判定：目标球（半径 R）沿进袋线飞向袋口，若其路径与某只袋口鼻
-   （半径 NOSE_R）的间距小于 R+NOSE_R 就会撞上。撞鼻按圆弧反弹简化为
-   镜面反射：以撞击点处「鼻心→球心」方向为法线做一次反射，再看反射后
-   的方向是否仍能绕过另一只鼻钻进袋口——绕得过算「擦库鼻但仍进」，
-   绕不过或被弹回台面算「撞鼻弹出」。 */
-function findNoseHit(origin, dir, distMax, noseList){
-  const keep = R + NOSE_R;
+/* 进袋判定：目标球心沿直线走向袋口；每只袋口鼻 + 喉道斜面是一个「胶囊」
+   （线段，半径 NOSE_R），球心须与它保持 ≥ R+NOSE_R 的距离。
+   撞上就按撞击点法线做镜面反射（鼻的圆弧 → 法线随撞击点变化），最多反弹 4 次：
+   球心越过落袋线（鼻圆心连线再深入 DROP_DEPTH）→ 进；折回台面 → 弹出。
+   status: clear 直接进 / rattle 擦鼻或喉壁后仍进 / out 弹出。 */
+function rayCircle(o, d, c, rho, tmax){
+  const fx=o.x-c.x, fy=o.y-c.y;
+  const B = fx*d.x+fy*d.y, C = fx*fx+fy*fy-rho*rho;
+  const disc = B*B-C;
+  if (disc<0 || C<0) return null;           // C<0：起点已在圆内，忽略
+  const t = -B-Math.sqrt(disc);
+  if (t<=1e-6 || t>=tmax) return null;
+  return {t, normal:{x:(fx+d.x*t)/rho, y:(fy+d.y*t)/rho}};
+}
+function rayCapsule(o, d, tmax, a, b, rho){
   let best = null;
-  for (const n of noseList){
-    const ox = n.x-origin.x, oy = n.y-origin.y;
-    const proj = ox*dir.x + oy*dir.y;
-    if (proj<=0 || proj>=distMax) continue;
-    const perpX = ox-proj*dir.x, perpY = oy-proj*dir.y;
-    const d = Math.hypot(perpX,perpY);
-    if (d >= keep) continue;
-    const back = Math.sqrt(Math.max(0, keep*keep - d*d));
-    const t = proj - back;
-    if (t>0 && t<distMax && (!best || t<best.t)){
-      const cx = origin.x+dir.x*t, cy = origin.y+dir.y*t;
-      best = { nose:n, t, pos:{x:cx,y:cy}, normal:{x:(cx-n.x)/keep, y:(cy-n.y)/keep} };
-    }
+  const take = h=>{ if (h && (!best || h.t<best.t)) best = h; };
+  take(rayCircle(o,d,a,rho,tmax));
+  take(rayCircle(o,d,b,rho,tmax));
+  const len = Math.hypot(b.x-a.x, b.y-a.y)||1;
+  const u = {x:(b.x-a.x)/len, y:(b.y-a.y)/len};
+  for (const sg of [1,-1]){
+    const n = {x:-u.y*sg, y:u.x*sg};
+    const dn = d.x*n.x+d.y*n.y;
+    if (dn>=0) continue;
+    const t = ((a.x+n.x*rho-o.x)*n.x + (a.y+n.y*rho-o.y)*n.y)/dn;
+    if (t<=1e-6 || t>=tmax) continue;
+    const s = (o.x+d.x*t-a.x)*u.x + (o.y+d.y*t-a.y)*u.y;
+    if (s>=0 && s<=len) take({t, normal:n});
   }
   return best;
 }
+function simulatePot(origin, dir0, geo){
+  const rho = R+NOSE_R, ax = geo.axis;
+  let pos = {x:origin.x, y:origin.y}, dir = {x:dir0.x, y:dir0.y};
+  const pts = [{x:pos.x, y:pos.y}], hits = [];
+  for (let k=0; k<5; k++){
+    const dn = dir.x*ax.x+dir.y*ax.y;
+    if (dn<=1e-6){                           // 朝袋外的分量没了 → 折回台面
+      pts.push({x:pos.x+dir.x*180, y:pos.y+dir.y*180});
+      return {status:'out', hits, pts};
+    }
+    const tDrop = Math.max(0, (geo.dropProj-(pos.x*ax.x+pos.y*ax.y))/dn);
+    let best = null;
+    for (const n of geo.noses){
+      const h = rayCapsule(pos, dir, tDrop, n.c, n.end, rho);
+      if (h && (!best || h.t<best.t)) best = {t:h.t, normal:h.normal, nose:n};
+    }
+    if (!best){
+      pts.push({x:pos.x+dir.x*tDrop, y:pos.y+dir.y*tDrop});
+      return {status:hits.length?'rattle':'clear', hits, pts};
+    }
+    const hp = {x:pos.x+dir.x*best.t, y:pos.y+dir.y*best.t};
+    hits.push({pos:hp, nose:best.nose, normal:best.normal});
+    pts.push(hp);
+    const dot = dir.x*best.normal.x+dir.y*best.normal.y;
+    dir = {x:dir.x-2*dot*best.normal.x, y:dir.y-2*dot*best.normal.y};
+    pos = {x:hp.x+best.normal.x*0.01, y:hp.y+best.normal.y*0.01};
+  }
+  pts.push({x:pos.x+dir.x*180, y:pos.y+dir.y*180});
+  return {status:'out', hits, pts};
+}
 function potJudge(){
-  const p = POCKETS[S.pk], nose = NOSES[S.pk];
-  const noseList = nose.corner ? [nose.h, nose.v] : [nose.l, nose.r];
-  const o = S.obj;
-  const distFull = dist(o,p)||1;
-  const dir = {x:(p.x-o.x)/distFull, y:(p.y-o.y)/distFull};
-  const hit1 = findNoseHit(o, dir, distFull, noseList);
-  if (!hit1) return {status:'clear'};
-  const nrm = hit1.normal;
-  const dot = dir.x*nrm.x + dir.y*nrm.y;
-  const rdir = {x:dir.x-2*dot*nrm.x, y:dir.y-2*dot*nrm.y};
-  const progress = rdir.x*dir.x + rdir.y*dir.y;
-  const remaining = noseList.filter(n=>n!==hit1.nose);
-  const hit2 = findNoseHit(hit1.pos, rdir, 200, remaining);
-  if (progress > 0.2 && !hit2) return {status:'rattle', nose:hit1.nose, pos:hit1.pos, dir:rdir};
-  return {status:'out', nose:hit1.nose, pos:hit1.pos, dir:rdir};
+  const p = POCKETS[S.pk], o = S.obj;
+  const dd = dist(o,p)||1;
+  return simulatePot(o, {x:(p.x-o.x)/dd, y:(p.y-o.y)/dd}, POCKET_GEO[S.pk]);
 }
 
 /* ================= 2D (SVG) ================= */
@@ -321,28 +376,47 @@ function el(tag, attrs, parent){
 /* 木框 + 台呢 */
 el('rect',{x:-L/2-CUSHION-30, y:-W/2-CUSHION-30, width:L+2*CUSHION+60, height:W+2*CUSHION+60, rx:34, fill:'#4a3421'});
 el('rect',{x:-L/2, y:-W/2, width:L, height:W, fill:'#35794B'});
-/* 库边：6 段独立矩形，端头圆角 = 袋口鼻，袋口处露出木框缺口 */
+/* 袋口喉道底色（黑）：从鼻圆内缘沿喉道斜面铺到袋底，再接圆形袋底 */
+POCKET_GEO.forEach(g=>{
+  const [na, nb] = g.noses;
+  const shift = g.corner ? 0 : NOSE_R;      // 中袋要把黑底补到台呢边缘
+  const inner = n=>{
+    const px = -n.dir.y, py = n.dir.x;
+    const sg = Math.sign((g.mouthMid.x-n.c.x)*px + (g.mouthMid.y-n.c.y)*py) || 1;
+    return {x:px*sg*NOSE_R - g.axis.x*shift, y:py*sg*NOSE_R - g.axis.y*shift, ex:px*sg*NOSE_R, ey:py*sg*NOSE_R};
+  };
+  const ia = inner(na), ib = inner(nb);
+  const q = [
+    {x:na.c.x+ia.x, y:na.c.y+ia.y}, {x:na.end.x+ia.ex, y:na.end.y+ia.ey},
+    {x:nb.end.x+ib.ex, y:nb.end.y+ib.ey}, {x:nb.c.x+ib.x, y:nb.c.y+ib.y}];
+  el('polygon',{points:q.map(v=>v.x+','+v.y).join(' '), fill:'#050403'});
+  el('circle',{cx:(q[1].x+q[2].x)/2, cy:(q[1].y+q[2].y)/2, r:Math.hypot(q[1].x-q[2].x, q[1].y-q[2].y)/2, fill:'#050403'});
+});
+/* 库边：6 段独立矩形，端头由喉道斜面（胶囊）的鼻圆接上 */
 CUSHIONS.forEach(seg=>{
   if (seg.side==='y'){
     const rx0 = Math.min(seg.x1,seg.x2), w = Math.abs(seg.x2-seg.x1);
     const ry0 = seg.sign>0 ? seg.y : seg.y-CUSHION;
-    el('rect',{x:rx0, y:ry0, width:w, height:CUSHION, rx:NOSE_R, ry:NOSE_R, fill:'#2a5f3c'});
+    el('rect',{x:rx0, y:ry0, width:w, height:CUSHION, fill:'#2a5f3c'});
   } else {
     const ry0 = Math.min(seg.y1,seg.y2), h = Math.abs(seg.y2-seg.y1);
     const rx0 = seg.sign>0 ? seg.x : seg.x-CUSHION;
-    el('rect',{x:rx0, y:ry0, width:CUSHION, height:h, rx:NOSE_R, ry:NOSE_R, fill:'#2a5f3c'});
+    el('rect',{x:rx0, y:ry0, width:CUSHION, height:h, fill:'#2a5f3c'});
   }
 });
+/* 鼻 + 喉道斜面（与判定用的胶囊同一份数据） */
+POCKET_GEO.forEach(g=> g.noses.forEach(n=>
+  el('line',{x1:n.c.x, y1:n.c.y, x2:n.end.x, y2:n.end.y, stroke:'#2a5f3c',
+    'stroke-width':2*NOSE_R, 'stroke-linecap':'round'})));
 /* baulk line + D */
 el('line',{x1:-L/2+BAULK, y1:-W/2, x2:-L/2+BAULK, y2:W/2, stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
 el('path',{d:`M ${-L/2+BAULK} ${-D_R} A ${D_R} ${D_R} 0 0 0 ${-L/2+BAULK} ${D_R}`, fill:'none', stroke:'#d9d2c0', 'stroke-width':4, opacity:0.75});
 SPOTS.forEach(s=> el('circle',{cx:s.x, cy:s.y, r:9, fill:'#d9d2c0', opacity:0.85}));
-/* 袋口 */
+/* 袋口选择热区 + 高亮环（落袋点 = 喉道内的 drop） */
 const pkEls = POCKETS.map((p,i)=>{
-  const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
-  el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r+14, fill:'#0d0b09'});
-  const hole = el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r, fill:'#000', style:'cursor:pointer'});
-  const ring = el('circle',{cx:p.x+ox, cy:p.y+oy, r:p.r+22, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
+  const c = POCKET_GEO[i].drop;
+  const ring = el('circle',{cx:c.x, cy:c.y, r:p.r+40, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
+  const hole = el('circle',{cx:c.x, cy:c.y, r:p.r+30, fill:'transparent', style:'cursor:pointer'});
   hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); S.pk=i; update(); });
   return ring;
 });
@@ -355,7 +429,7 @@ const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'st
 const gBounce = el('g',{opacity:0}, gAns);
 const bounceNoseRing = el('circle',{r:NOSE_R+6, fill:'none', stroke:'#e05c5c','stroke-width':3}, gBounce);
 const bounceHit = el('circle',{r:6, fill:'#e05c5c'}, gBounce);
-const bounceLine = el('line',{stroke:'#e05c5c','stroke-width':4,'stroke-dasharray':'6 6'}, gBounce);
+const bouncePath = el('polyline',{fill:'none', stroke:'#e05c5c','stroke-width':4,'stroke-dasharray':'6 6'}, gBounce);
 /* 球（含放大的触摸热区） */
 function makeBall(fill, stroke){
   const g = el('g',{style:'cursor:grab'});
@@ -479,24 +553,14 @@ function init3d(){
     m.position.set(x,y,z); scene3.add(m);
   }
   const cw=CUSHION*MM;
-  /* 库边：6 段独立几何 + 袋口鼻圆柱（半径 NOSE_R，代替尖角） */
+  /* 库边：6 段独立几何；鼻 + 喉道斜面见下方 POCKET_GEO 循环 */
   CUSHIONS.forEach(seg=>{
     if (seg.side==='y'){
       const w = Math.abs(seg.x2-seg.x1)*MM, cz = (seg.sign>0? seg.y+CUSHION/2 : seg.y-CUSHION/2)*MM;
       bar(cushM, w, 0.045, cw, (seg.x1+seg.x2)/2*MM, 0.0225, cz);
-      [seg.x1, seg.x2].forEach(nx=>{
-        const nose = new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
-        nose.position.set(nx*MM, 0.0225, seg.y*MM);
-        scene3.add(nose);
-      });
     } else {
       const d = Math.abs(seg.y2-seg.y1)*MM, cx = (seg.sign>0? seg.x+CUSHION/2 : seg.x-CUSHION/2)*MM;
       bar(cushM, cw, 0.045, d, cx, 0.0225, (seg.y1+seg.y2)/2*MM);
-      [seg.y1, seg.y2].forEach(ny=>{
-        const nose = new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
-        nose.position.set(seg.x*MM, 0.0225, ny*MM);
-        scene3.add(nose);
-      });
     }
   });
   bar(railM, Lm+2*cw+0.12, 0.05, 0.06, 0, 0.025,  Wm/2+cw+0.03);
@@ -520,12 +584,35 @@ function init3d(){
     d.position.set(s.x*MM, 0.0012, s.y*MM);
     scene3.add(d);
   });
-  /* 袋口 */
-  POCKETS.forEach(p=>{
-    const c=new THREE.Mesh(new THREE.CylinderGeometry(p.r*MM, p.r*MM, 0.004, 24), new THREE.MeshBasicMaterial({color:0x050505}));
-    const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
-    c.position.set((p.x+ox)*MM, 0.002, (p.y+oy)*MM);
-    scene3.add(c);
+  /* 袋口：喉道黑底（与 2D 同一多边形）+ 鼻圆柱 + 喉道斜面 */
+  const holeM = new THREE.MeshBasicMaterial({color:0x050403});
+  POCKET_GEO.forEach(g=>{
+    const [na, nb] = g.noses;
+    const shift = g.corner ? 0 : NOSE_R;
+    const inner = n=>{
+      const px=-n.dir.y, py=n.dir.x;
+      const sg = Math.sign((g.mouthMid.x-n.c.x)*px + (g.mouthMid.y-n.c.y)*py) || 1;
+      return {sx:px*sg*NOSE_R - g.axis.x*shift, sy:py*sg*NOSE_R - g.axis.y*shift, ex:px*sg*NOSE_R, ey:py*sg*NOSE_R};
+    };
+    const ia=inner(na), ib=inner(nb);
+    const q=[[na.c.x+ia.sx, na.c.y+ia.sy],[na.end.x+ia.ex, na.end.y+ia.ey],
+             [nb.end.x+ib.ex, nb.end.y+ib.ey],[nb.c.x+ib.sx, nb.c.y+ib.sy]];
+    const shp=new THREE.Shape(q.map(v=>new THREE.Vector2(v[0]*MM, -v[1]*MM)));
+    const poly=new THREE.Mesh(new THREE.ShapeGeometry(shp), holeM);
+    poly.rotation.x=-Math.PI/2; poly.position.y=0.002; scene3.add(poly);
+    const ex=(q[1][0]+q[2][0])/2, ey=(q[1][1]+q[2][1])/2, er=Math.hypot(q[1][0]-q[2][0], q[1][1]-q[2][1])/2;
+    const disc=new THREE.Mesh(new THREE.CylinderGeometry(er*MM, er*MM, 0.004, 24), holeM);
+    disc.position.set(ex*MM, 0.002, ey*MM); scene3.add(disc);
+    g.noses.forEach(n=>{
+      [n.c, n.end].forEach(pt=>{
+        const cyl=new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
+        cyl.position.set(pt.x*MM, 0.0225, pt.y*MM); scene3.add(cyl);
+      });
+      const box=new THREE.Mesh(new THREE.BoxGeometry(JAW_LEN*MM, 0.045, 2*NOSE_R*MM), cushM);
+      box.position.set((n.c.x+n.end.x)/2*MM, 0.0225, (n.c.y+n.end.y)/2*MM);
+      box.rotation.y = -Math.atan2(n.dir.y, n.dir.x);
+      scene3.add(box);
+    });
   });
   ball3.target = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.007, 8, 32), new THREE.MeshBasicMaterial({color:0xc9a45c}));
   ball3.target.rotation.x=-Math.PI/2;
@@ -800,10 +887,10 @@ function update(){
     gBounce.setAttribute('opacity',0);
   } else {
     gBounce.setAttribute('opacity',1);
-    bounceNoseRing.setAttribute('cx', pj.nose.x); bounceNoseRing.setAttribute('cy', pj.nose.y);
-    bounceHit.setAttribute('cx', pj.pos.x); bounceHit.setAttribute('cy', pj.pos.y);
-    bounceLine.setAttribute('x1', pj.pos.x); bounceLine.setAttribute('y1', pj.pos.y);
-    bounceLine.setAttribute('x2', pj.pos.x+pj.dir.x*140); bounceLine.setAttribute('y2', pj.pos.y+pj.dir.y*140);
+    const h0 = pj.hits[0];
+    bounceNoseRing.setAttribute('cx', h0.nose.c.x); bounceNoseRing.setAttribute('cy', h0.nose.c.y);
+    bounceHit.setAttribute('cx', h0.pos.x); bounceHit.setAttribute('cy', h0.pos.y);
+    bouncePath.setAttribute('points', pj.pts.slice(1).map(v=>v.x+','+v.y).join(' '));
   }
 
   /* 3D */
@@ -811,8 +898,8 @@ function update(){
     ball3.cue.position.set(S.cue.x*MM, R*MM, S.cue.y*MM);
     ball3.obj.position.set(S.obj.x*MM, R*MM, S.obj.y*MM);
     ghost3.position.set(g.x*MM, R*MM, g.y*MM);
-    const ox = p.x===0?0:(p.x>0?26:-26), oy = p.y>0?26:-26;
-    ball3.target.position.set((p.x+ox)*MM, 0.004, (p.y+oy)*MM);
+    const dp = POCKET_GEO[S.pk].drop;
+    ball3.target.position.set(dp.x*MM, 0.004, dp.y*MM);
     lnOP3.geometry.setFromPoints([
       new THREE.Vector3(S.obj.x*MM, R*MM, S.obj.y*MM),
       new THREE.Vector3(p.x*MM, R*MM, p.y*MM)]);
@@ -826,10 +913,9 @@ function update(){
     const showBounce = S.showAnswer && pj.status!=='clear';
     bounceRing3.visible = bounceLine3.visible = showBounce;
     if (showBounce){
-      bounceRing3.position.set(pj.nose.x*MM, 0.003, pj.nose.y*MM);
-      bounceLine3.geometry.setFromPoints([
-        new THREE.Vector3(pj.pos.x*MM, R*MM, pj.pos.y*MM),
-        new THREE.Vector3((pj.pos.x+pj.dir.x*140)*MM, R*MM, (pj.pos.y+pj.dir.y*140)*MM)]);
+      const h0 = pj.hits[0];
+      bounceRing3.position.set(h0.nose.c.x*MM, 0.003, h0.nose.c.y*MM);
+      bounceLine3.geometry.setFromPoints(pj.pts.slice(1).map(v=>new THREE.Vector3(v.x*MM, R*MM, v.y*MM)));
       bounceLine3.computeLineDistances();
     }
   }
