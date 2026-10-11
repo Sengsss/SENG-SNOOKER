@@ -53,6 +53,22 @@
   .aim-ctl{display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);}
   .aim-ctl input{width:110px; accent-color:var(--brass);}
   .aim-ctl .btn{padding:5px 10px; font-size:12px;}
+  .btn.primary{background:var(--brass); color:#1c1915; font-weight:600; border-color:var(--brass);}
+  .qmsg{flex:1; min-width:220px; font-size:13px; line-height:1.5;}
+  .qmsg.ok{color:var(--good);} .qmsg.bad{color:var(--hard);}
+  .ovpick{display:flex; gap:4px; flex-wrap:wrap;}
+  .ovpick button{background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:6px; padding:6px 9px; font-size:13px; cursor:pointer; font-family:inherit;}
+  .ovpick button.on{background:var(--brass); color:#1c1915; font-weight:600;}
+  .modal{position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; padding:14px;}
+  .modal-card{background:var(--panel); border:1px solid #4a4234; border-radius:12px; width:min(720px,100%); max-height:90vh; overflow:auto; padding:14px 16px;}
+  .modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:16px;}
+  .modal-foot{margin-top:12px; text-align:right;}
+  .stbl{width:100%; border-collapse:collapse; font-size:13px; margin:6px 0 14px; font-variant-numeric:tabular-nums;}
+  .stbl th,.stbl td{border-bottom:1px solid #3a342a; padding:6px 6px; text-align:right;}
+  .stbl th:first-child,.stbl td:first-child{text-align:left;}
+  .stbl th{color:var(--muted); font-weight:500;}
+  .sec-t{color:var(--brass); font-size:14px; margin-top:6px;}
+  .tip{font-size:13px; line-height:1.7; color:var(--text); background:var(--panel2); border-radius:8px; padding:8px 10px; margin-bottom:8px;}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
   #wrap2d, #wrap3d{
@@ -127,6 +143,7 @@
   <div class="seg" id="segMode">
     <button data-m="free" class="on">自由摆放</button>
     <button data-m="random">系统随机</button>
+    <button data-m="quiz">测验</button>
   </div>
   <select id="selDiff" style="display:none;">
     <option value="any">难度：任意</option>
@@ -149,6 +166,25 @@
   </span>
   <button class="btn" id="btnFan">袋口扇形 ◔</button>
   <span class="hint" id="hintText">拖动白球 / 红球 · 点击袋口选择目标袋</span>
+</div>
+
+<div class="bar quizbar" id="quizBar" style="display:none;">
+  <div class="seg" id="segQuiz">
+    <button data-q="ghost" class="on">点选假想球</button>
+    <button data-q="ov">叠球 x/8</button>
+  </div>
+  <span class="qmsg" id="quizMsg"></span>
+  <span class="ovpick" id="ovPick" style="display:none;"></span>
+  <button class="btn primary" id="btnSubmit">提交</button>
+  <button class="btn" id="btnStats">统计 📊</button>
+</div>
+
+<div class="modal" id="statsModal" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head"><b>测验统计</b><button class="btn" id="btnStatsClose">关闭 ✕</button></div>
+    <div id="statsBody"></div>
+    <div class="modal-foot"><button class="btn" id="btnStatsClear">清空记录</button></div>
+  </div>
 </div>
 
 <div class="stage">
@@ -346,6 +382,8 @@ const S = {
   view: '2d',
 };
 
+/* v2 测验状态：type = ghost（点选假想球）| ov（叠球 x/8）；phase = ask | result */
+const Q = {on:false, type:'ghost', phase:'ask', t0:0, guess:null, pick:null, res:null};
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
 
@@ -610,7 +648,7 @@ const pkEls = POCKETS.map((p,i)=>{
   const c = POCKET_GEO[i].drop;
   const ring = el('circle',{cx:c.x, cy:c.y, r:p.r+40, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
   const hole = el('circle',{cx:c.x, cy:c.y, r:p.r+30, fill:'transparent', style:'cursor:pointer'});
-  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); if (S.pk!==i) setAimOff(0, true); S.pk=i; syncAimSlider(); update(); });
+  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); if (S.mode==='quiz') return; if (S.pk!==i) setAimOff(0, true); S.pk=i; syncAimSlider(); update(); });
   return ring;
 });
 /* 瞄准线 + 假想球（答案层） */
@@ -646,6 +684,13 @@ function makeBall(fill, stroke){
 }
 const bObj = makeBall('#c8342b','#7a1712');
 const bCue = makeBall('#f3eee0','#b8b09a');
+/* 测验层：你放的假想球 / 你的出杆线 / 判分后的误差线与红球实际走向 */
+const gQuiz = el('g',{'pointer-events':'none'});
+const qAim = el('line',{stroke:'#c9a45c','stroke-width':4,'stroke-dasharray':'14 12',opacity:0.8}, gQuiz);
+const qPath = el('polyline',{fill:'none', stroke:'#e05c5c','stroke-width':5,'stroke-dasharray':'6 8'}, gQuiz);
+const qErr = el('line',{stroke:'#e05c5c','stroke-width':5}, gQuiz);
+const qGuess = el('circle',{r:R, fill:'#c9a45c','fill-opacity':0.28, stroke:'#c9a45c','stroke-width':5}, gQuiz);
+const qDot = el('circle',{r:6, fill:'#c9a45c'}, gQuiz);
 
 function svgPoint(evt){
   const p = svg.createSVGPoint();
@@ -669,7 +714,8 @@ svg.addEventListener('pointerdown', e=>{
     return;
   }
   const p = svgPoint(e);
-  if (S.showAnswer && dist(p,pocketAim())<50) drag2d='aim';
+  if (Q.on && Q.type==='ghost' && Q.phase==='ask' && Q.guess && dist(p,Q.guess)<90) drag2d='guess';
+  else if (S.showAnswer && dist(p,pocketAim())<50) drag2d='aim';
   else if (S.mode==='free' && dist(p,S.cue)<80) drag2d='cue';
   else if (S.mode==='free' && dist(p,S.obj)<80) drag2d='obj';
   else { drag2d='pan'; panStart={x:e.clientX, y:e.clientY, cx0:Z.cx, cy0:Z.cy}; }
@@ -687,7 +733,9 @@ svg.addEventListener('pointermove', e=>{
     e.preventDefault();
     return;
   }
-  if (drag2d==='aim'){
+  if (drag2d==='guess'){
+    setGuess(svgPoint(e));
+  } else if (drag2d==='aim'){
     const p = svgPoint(e), c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
     setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
   } else if (drag2d==='cue' || drag2d==='obj'){
@@ -722,8 +770,12 @@ function cushionAt(p){
 function endPointer2d(e){
   if (e.type==='pointerup' && tapStart && pointers2d.size===1 && drag2d==='pan' &&
       Math.hypot(e.clientX-tapStart.x, e.clientY-tapStart.y)<8){
-    const side = cushionAt(tapStart.p);
-    if (side) setBank(S.bank===side ? null : side);
+    if (S.mode==='quiz'){
+      if (Math.abs(tapStart.p.x)<=L/2 && Math.abs(tapStart.p.y)<=W/2) setGuess(tapStart.p);
+    } else {
+      const side = cushionAt(tapStart.p);
+      if (side) setBank(S.bank===side ? null : side);
+    }
   }
   tapStart = null;
   pointers2d.delete(e.pointerId);
@@ -746,7 +798,7 @@ document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -873,6 +925,8 @@ function init3d(){
   /* 借库（3D）：镜像袋口环 + 库边高亮条 */
   mirror3 = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.047, 32), new THREE.MeshBasicMaterial({color:0xe8e2d6, side:THREE.DoubleSide}));
   mirror3.rotation.x = -Math.PI/2; mirror3.visible = false; scene3.add(mirror3);
+  quizRing3 = new THREE.Mesh(new THREE.RingGeometry(R*MM*0.85, R*MM*1.0, 32), new THREE.MeshBasicMaterial({color:0xc9a45c, side:THREE.DoubleSide}));
+  quizRing3.rotation.x = -Math.PI/2; quizRing3.visible = false; scene3.add(quizRing3);
   bankStrip3 = new THREE.Mesh(new THREE.BoxGeometry(1,0.012,0.012), new THREE.MeshBasicMaterial({color:0xc9a45c}));
   bankStrip3.visible = false; scene3.add(bankStrip3);
   ball3.target = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.007, 8, 32), new THREE.MeshBasicMaterial({color:0xc9a45c}));
@@ -936,6 +990,12 @@ function init3d(){
     ray.setFromCamera(mv,cam3);
   }
   renderer3.domElement.addEventListener('pointerdown',e=>{
+    if (Q.on && Q.type==='ghost' && Q.phase==='ask' && camMode==='top'){
+      setRay(e);
+      const qh=new THREE.Vector3();
+      if (ray.ray.intersectPlane(plane,qh)) setGuess({x:qh.x/MM, y:qh.z/MM});
+      return;
+    }
     if (camMode==='player'||S.mode!=='free') return;
     setRay(e);
     const hit=new THREE.Vector3();
@@ -1026,7 +1086,8 @@ const BANDS = {any:[0,80], easy:[0,25], mid:[25,50], hard:[50,80]};
 function randomLayout(){
   S.bank = null; document.getElementById('selBank').value = ''; S.aimOff = 0;
   const band = BANDS[document.getElementById('selDiff').value];
-  for (let i=0;i<400;i++){
+  let ok = false;
+  for (let i=0;i<600 && !ok;i++){
     S.pk = Math.floor(Math.random()*6);
     S.obj = {x:(Math.random()-0.5)*(L-6*R), y:(Math.random()-0.5)*(W-6*R)};
     S.cue = {x:(Math.random()-0.5)*(L-6*R), y:(Math.random()-0.5)*(W-6*R)};
@@ -1035,7 +1096,12 @@ function randomLayout(){
     const g = ghostPos();
     if (Math.abs(g.x)>L/2-R || Math.abs(g.y)>W/2-R) continue;
     const a = cutAngle();
-    if (a>=band[0] && a<=band[1]) break;
+    if (a<band[0] || a>band[1]) continue;
+    if (Q.on && potJudge().status==='out') continue;     // 测验题必须是「打准了就能进」的球
+    ok = true;
+  }
+  if (!ok){                                              // 兜底：固定一个合法球形，避免出界 / 无解
+    S.pk = 5; S.obj = {x:600, y:-200}; S.cue = {x:-L/2+BAULK-200, y:150};
   }
   syncAimSlider(); update();
   followCam();
@@ -1380,6 +1446,8 @@ function update(){
     ghost3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
     setFan3(fanOuter3, S.showAnswer ? triO : []);
     setFan3(fanInner3, S.showAnswer ? triI : []);
+    quizRing3.visible = !!(Q.on && Q.guess);
+    if (Q.guess) quizRing3.position.set(Q.guess.x*MM, 0.004, Q.guess.y*MM);
     mirror3.visible = bankStrip3.visible = S.showAnswer && !!S.bank;
     if (S.bank){
       const bk = BANKS[S.bank], T = aimTarget(), fc = bk.v + (bk.sign<0?-R:R);
@@ -1450,7 +1518,10 @@ function update(){
 
   /* 隐藏答案：凡是能反推假想球 / 切角 / 能否进袋的读数一律遮住，只留红球行程 */
   const ovCard = document.querySelector('.overlap-card');
-  ovCard.classList.toggle('masked', !S.showAnswer);
+  const ovQuiz = Q.on && Q.type==='ov';
+  ovCard.classList.toggle('masked', !S.showAnswer && !ovQuiz);
+  setOvDetail(S.showAnswer || !ovQuiz);
+  updateQuizLayer();
   if (!S.showAnswer){
     ['angVal','fullVal','cueDistVal','sideVal','diffVal','potVal','fanVal','aimVal'].forEach(id=>{
       const e = document.getElementById(id);
@@ -1458,6 +1529,210 @@ function update(){
     });
   }
 }
+
+/* ================= v2 点选测验 + 计分 ================= */
+const QKEY = 'snooker-quiz-v1';
+let qMem = [];                                   // localStorage 不可用时的内存后备
+function qLoad(){
+  try{ const v = JSON.parse(localStorage.getItem(QKEY)||'[]'); return Array.isArray(v) ? v : []; }
+  catch(e){ return qMem; }
+}
+function qSave(arr){
+  qMem = arr;
+  try{ localStorage.setItem(QKEY, JSON.stringify(arr)); }catch(e){}
+}
+function qRecord(rec){
+  const arr = qLoad(); arr.push(rec);
+  qSave(arr.slice(-1000));
+}
+function setOvDetail(on){
+  const d = on ? '' : 'none';
+  ovRulerG.style.display = d; ovLens.style.display = d; ovDep.style.display = d;
+  ovArc.style.display = d; ovArcTxt.style.display = d;
+  ovQLines.forEach(l=> l.style.display = d);
+  document.querySelector('.ov-label').style.visibility = on ? 'visible' : 'hidden';
+}
+/* 叠球 x/8 选择按钮 */
+(function(){
+  const box = document.getElementById('ovPick');
+  for (let i=0;i<=8;i++){
+    const b = document.createElement('button');
+    b.textContent = i+'/8'; b.dataset.g = i;
+    b.addEventListener('click', ()=>{
+      if (!(Q.on && Q.type==='ov' && Q.phase==='ask')) return;
+      Q.pick = i; quizUI();
+    });
+    box.appendChild(b);
+  }
+})();
+
+function startQuiz(){
+  if (S.view!=='2d') document.querySelector('#segView button[data-v="2d"]').click();
+  Q.on = true;
+  newQuestion();
+}
+function newQuestion(){
+  Q.phase = 'ask'; Q.guess = null; Q.pick = null; Q.res = null;
+  S.showAnswer = false;
+  randomLayout();
+  Q.t0 = performance.now();
+  quizUI();
+  hint(Q.type==='ghost' ? '点击台面放置假想球，可拖动微调' : '目测红球被白球覆盖了几个 1/8');
+}
+function setGuess(p){
+  if (!(Q.on && Q.type==='ghost' && Q.phase==='ask')) return;
+  let x = clamp(p.x, -L/2+R, L/2-R), y = clamp(p.y, -W/2+R, W/2-R);
+  const dx = x-S.obj.x, dy = y-S.obj.y, d = Math.hypot(dx,dy)||1;
+  if (d < 2*R){ x = S.obj.x+dx/d*2*R; y = S.obj.y+dy/d*2*R; }   // 两球不能重叠
+  Q.guess = {x, y};
+  update(); quizUI();
+}
+/* 判分：按你放的点算出杆线（白球→该点），看它在哪里碰到红球，再模拟红球走向 */
+function evalGhost(G){
+  const o = S.obj, c = S.cue, g = ghostPos(), geo = POCKET_GEO[S.pk];
+  const ul = Math.hypot(G.x-c.x, G.y-c.y)||1, u = {x:(G.x-c.x)/ul, y:(G.y-c.y)/ul};
+  const f = {x:c.x-o.x, y:c.y-o.y}, B = f.x*u.x+f.y*u.y, C = f.x*f.x+f.y*f.y-4*R*R, disc = B*B-C;
+  const gl = Math.hypot(g.x-c.x, g.y-c.y)||1, ug = {x:(g.x-c.x)/gl, y:(g.y-c.y)/gl};
+  const r = {type:'ghost', t:Date.now(), ang:cutAngle(), err:dist(G,g), secs:(performance.now()-Q.t0)/1000,
+             pot:false, miss:false, thin:null, dev:null, devLeft:false, pts:[], contact:null, bank:!!S.bank};
+  const tHit = -B-Math.sqrt(Math.max(disc,0));
+  if (disc<0 || tHit<=0){ r.miss = true; return r; }
+  const ct = {x:c.x+u.x*tHit, y:c.y+u.y*tHit};
+  const dl = dist(o,ct)||1, d = {x:(o.x-ct.x)/dl, y:(o.y-ct.y)/dl};
+  const sim = simulateShot(o, Math.atan2(d.y,d.x), geo);
+  const T = aimTarget(), cr = d.x*(T.y-o.y)-d.y*(T.x-o.x);
+  const offUser = Math.abs(u.x*(o.y-c.y)-u.y*(o.x-c.x));
+  const offTrue = Math.abs(ug.x*(o.y-c.y)-ug.y*(o.x-c.x));
+  Object.assign(r, {pot:sim.status!=='out', pts:sim.pts, contact:ct, dev:Math.abs(cr), devLeft:cr>0, thin:offUser-offTrue});
+  return r;
+}
+function submitQuiz(){
+  if (!Q.on) return;
+  if (Q.phase==='result'){ newQuestion(); return; }
+  const msg = document.getElementById('quizMsg');
+  if (Q.type==='ghost'){
+    if (!Q.guess){ msg.className='qmsg bad'; msg.textContent='先点击台面，放置你认为的假想球位置'; return; }
+    const r = evalGhost(Q.guess); Q.res = r;
+    qRecord({type:'ghost', t:r.t, ang:+r.ang.toFixed(1), err:+r.err.toFixed(1), dev:r.dev==null?null:+r.dev.toFixed(1),
+             thin:r.thin==null?null:+r.thin.toFixed(1), pot:r.pot, miss:r.miss, secs:+r.secs.toFixed(1), bank:r.bank});
+  } else {
+    if (Q.pick==null){ msg.className='qmsg bad'; msg.textContent='先选择你认为的覆盖量（x/8）'; return; }
+    const a = cutAngle(), e = Math.max(0, 1-Math.sin(Math.min(a,90)*Math.PI/180))*8;
+    const ok = Math.abs(Q.pick-e) <= 0.5;
+    Q.res = {type:'ov', ang:a, actual:e, guess:Q.pick, ok, secs:(performance.now()-Q.t0)/1000};
+    qRecord({type:'ov', t:Date.now(), ang:+a.toFixed(1), actual:+e.toFixed(2), guess:Q.pick, ok, secs:+Q.res.secs.toFixed(1)});
+  }
+  Q.phase = 'result';
+  S.showAnswer = true;
+  update(); quizUI();
+}
+function quizUI(){
+  if (!Q.on){ return; }
+  const msg = document.getElementById('quizMsg'), res = Q.res;
+  document.querySelectorAll('#segQuiz button').forEach(b=> b.classList.toggle('on', b.dataset.q===Q.type));
+  document.getElementById('ovPick').style.display = Q.type==='ov' ? '' : 'none';
+  document.querySelectorAll('#ovPick button').forEach(b=> b.classList.toggle('on', Q.pick!=null && +b.dataset.g===Q.pick));
+  document.getElementById('btnSubmit').textContent = Q.phase==='ask' ? '提交' : '下一题 ➜';
+  if (Q.phase==='ask'){
+    msg.className = 'qmsg';
+    msg.textContent = Q.type==='ghost'
+      ? '点击台面放置你认为的假想球（白球碰红球那一刻的白球位置），可拖动微调，然后「提交」。'
+      : '红球被白球覆盖了几个 1/8？选一个，误差在 ±0.5/8 内算对。';
+    return;
+  }
+  if (res.type==='ghost'){
+    if (res.miss){ msg.className='qmsg bad'; msg.textContent = `没碰到红球 ✗　假想球误差 ${res.err.toFixed(0)} mm　用时 ${res.secs.toFixed(1)}s`; return; }
+    const thin = Math.abs(res.thin)<1.5 ? '厚薄准' : (res.thin>0?'偏薄 ':'偏厚 ')+Math.abs(res.thin).toFixed(0)+' mm';
+    msg.className = 'qmsg '+(res.pot?'ok':'bad');
+    msg.textContent = `${res.pot?'✓ 进袋':'✗ 不进'}　假想球误差 ${res.err.toFixed(0)} mm（${thin}）　袋口${res.devLeft?'偏左':'偏右'} ${res.dev.toFixed(0)} mm　用时 ${res.secs.toFixed(1)}s`;
+  } else {
+    msg.className = 'qmsg '+(res.ok?'ok':'bad');
+    msg.textContent = `${res.ok?'✓ 正确':'✗ 偏了'}　实际 ${res.actual.toFixed(1)}/8（切角 ${res.ang.toFixed(1)}°），你选 ${res.guess}/8（${res.guess-res.actual>=0?'+':''}${(res.guess-res.actual).toFixed(1)}）　用时 ${res.secs.toFixed(1)}s`;
+  }
+}
+function updateQuizLayer(){
+  const G = Q.on && Q.type==='ghost' ? Q.guess : null, res = Q.res;
+  gQuiz.setAttribute('opacity', G ? 1 : 0);
+  if (!G) return;
+  qGuess.setAttribute('cx',G.x); qGuess.setAttribute('cy',G.y);
+  qDot.setAttribute('cx',G.x); qDot.setAttribute('cy',G.y);
+  qAim.setAttribute('x1',S.cue.x); qAim.setAttribute('y1',S.cue.y);
+  qAim.setAttribute('x2',G.x); qAim.setAttribute('y2',G.y);
+  const showRes = Q.phase==='result' && res && res.type==='ghost';
+  const gp = ghostPos();
+  qErr.setAttribute('opacity', showRes?1:0);
+  qPath.setAttribute('opacity', showRes && !res.miss ? 1 : 0);
+  if (showRes){
+    qErr.setAttribute('x1',G.x); qErr.setAttribute('y1',G.y); qErr.setAttribute('x2',gp.x); qErr.setAttribute('y2',gp.y);
+    if (!res.miss) qPath.setAttribute('points', res.pts.map(v=>v.x+','+v.y).join(' '));
+  }
+}
+document.getElementById('segQuiz').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if (!b || !Q.on) return;
+  Q.type = b.dataset.q;
+  newQuestion();
+});
+document.getElementById('btnSubmit').addEventListener('click', submitQuiz);
+
+/* ----- 统计页 ----- */
+const Q_BANDS = [[0,15],[15,30],[30,45],[45,90]];
+const mean = a=> a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+function thinTxt(v){
+  if (v==null) return '—';
+  if (Math.abs(v)<3) return '基本准';
+  return (v>0?'偏薄 ':'偏厚 ')+Math.abs(v).toFixed(0)+' mm';
+}
+function showStats(){
+  const all = qLoad(), gh = all.filter(r=>r.type==='ghost'), ov = all.filter(r=>r.type==='ov');
+  let h = '';
+  h += `<div class="sec-t">点选假想球（共 ${gh.length} 题）</div>`;
+  if (!gh.length) h += '<div class="tip">还没有记录。进入「测验 → 点选假想球」做几题吧。</div>';
+  else {
+    const rows = Q_BANDS.map(([lo,hi])=>{
+      const rs = gh.filter(r=>r.ang>=lo && (r.ang<hi || (hi===90 && r.ang<=90)));
+      return {lo, hi, n:rs.length, err:mean(rs.map(r=>r.err)), hit:rs.length ? rs.filter(r=>r.pot).length/rs.length : null,
+              thin:mean(rs.filter(r=>r.thin!=null).map(r=>r.thin)), miss:rs.filter(r=>r.miss).length};
+    });
+    h += '<table class="stbl"><tr><th>切角区间</th><th>题数</th><th>平均误差</th><th>命中率</th><th>厚薄偏差</th></tr>';
+    rows.forEach(r=>{
+      h += `<tr><td>${r.lo}–${r.hi===90?'90':r.hi}°</td><td>${r.n}</td><td>${r.err==null?'—':r.err.toFixed(0)+' mm'}</td>`+
+           `<td>${r.hit==null?'—':Math.round(r.hit*100)+'%'}</td><td>${thinTxt(r.thin)}</td></tr>`;
+    });
+    h += '</table>';
+    const cand = rows.filter(r=>r.n>=3).sort((a,b)=>b.err-a.err);
+    if (cand.length){
+      const w = cand[0];
+      let tip = `最弱区间：<b>${w.lo}–${w.hi===90?'90':w.hi}°</b>，平均误差 ${w.err.toFixed(0)} mm，命中率 ${Math.round(w.hit*100)}%。`;
+      if (w.thin!=null && Math.abs(w.thin)>=3)
+        tip += `你在这个区间系统性${w.thin>0?'偏薄（瞄得太细，吃球不够）':'偏厚（瞄得太满，吃球太多）'}约 ${Math.abs(w.thin).toFixed(0)} mm，下次先往${w.thin>0?'多吃一点':'少吃一点'}的方向修正。`;
+      h += `<div class="tip">${tip}</div>`;
+    } else h += '<div class="tip">每个区间至少做 3 题才能给出弱点分析。</div>';
+    const last = gh.slice(-20);
+    h += `<div class="tip">最近 ${last.length} 题：命中率 ${Math.round(last.filter(r=>r.pot).length/last.length*100)}%，平均误差 ${mean(last.map(r=>r.err)).toFixed(0)} mm，平均用时 ${mean(last.map(r=>r.secs)).toFixed(1)}s。</div>`;
+  }
+  h += `<div class="sec-t">叠球 x/8（共 ${ov.length} 题）</div>`;
+  if (!ov.length) h += '<div class="tip">还没有记录。进入「测验 → 叠球 x/8」试试。</div>';
+  else {
+    h += '<table class="stbl"><tr><th>切角区间</th><th>题数</th><th>正确率</th><th>平均偏差（所选−实际）</th></tr>';
+    Q_BANDS.forEach(([lo,hi])=>{
+      const rs = ov.filter(r=>r.ang>=lo && (r.ang<hi || (hi===90 && r.ang<=90)));
+      const d = mean(rs.map(r=>r.guess-r.actual));
+      h += `<tr><td>${lo}–${hi===90?'90':hi}°</td><td>${rs.length}</td><td>${rs.length?Math.round(rs.filter(r=>r.ok).length/rs.length*100)+'%':'—'}</td>`+
+           `<td>${d==null?'—':(d>=0?'+':'')+d.toFixed(2)+'/8'}</td></tr>`;
+    });
+    h += '</table>';
+    const bias = mean(ov.map(r=>r.guess-r.actual));
+    h += `<div class="tip">整体${Math.abs(bias)<0.25?'没有明显偏向':(bias>0?'倾向<b>高估覆盖</b>（把球看得比实际更厚）':'倾向<b>低估覆盖</b>（把球看得比实际更薄）')}，平均偏差 ${bias>=0?'+':''}${bias.toFixed(2)}/8。</div>`;
+  }
+  document.getElementById('statsBody').innerHTML = h;
+  document.getElementById('statsModal').style.display = 'flex';
+}
+document.getElementById('btnStats').addEventListener('click', showStats);
+document.getElementById('btnStatsClose').addEventListener('click', ()=>{ document.getElementById('statsModal').style.display='none'; });
+document.getElementById('statsModal').addEventListener('click', e=>{ if (e.target.id==='statsModal') e.target.style.display='none'; });
+document.getElementById('btnStatsClear').addEventListener('click', ()=>{
+  if (window.confirm('确定清空所有测验记录？')){ qSave([]); showStats(); }
+});
 
 /* ================= UI 事件 ================= */
 document.getElementById('segView').addEventListener('click', e=>{
@@ -1475,13 +1750,22 @@ document.getElementById('segMode').addEventListener('click', e=>{
   document.querySelectorAll('#segMode button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
   S.mode = b.dataset.m;
-  const rnd = S.mode==='random';
-  document.getElementById('selDiff').style.display = rnd?'':'none';
-  document.getElementById('btnNext').style.display = rnd?'':'none';
-  hint(rnd?'点「换一题」生成新球形':'拖动白球 / 红球 · 点击袋口选择目标袋');
-  if (rnd) randomLayout();
+  const rnd = S.mode==='random', qz = S.mode==='quiz';
+  document.getElementById('selDiff').style.display = (rnd||qz)?'':'none';
+  document.getElementById('btnNext').style.display = (rnd||qz)?'':'none';
+  document.getElementById('btnNext').textContent = qz ? '跳过 ⏭' : '换一题 ⟳';
+  document.getElementById('btnAnswer').style.display = qz ? 'none' : '';
+  document.getElementById('quizBar').style.display = qz ? '' : 'none';
+  ['.aim-ctl','#selBank','#btnFan'].forEach(q=> document.querySelector(q).style.display = qz ? 'none' : '');   // 测验里不提供辅助
+  if (qz){ startQuiz(); return; }
+  if (Q.on){                       // 离开测验：恢复显示答案
+    Q.on = false; S.showAnswer = true;
+    document.getElementById('btnAnswer').textContent = '隐藏答案 👁';
+  }
+  hint(rnd?'点「换一题」生成新球形':'拖动白球 / 红球 · 点袋口选目标袋 · 点库边设置借库');
+  if (rnd) randomLayout(); else update();
 });
-document.getElementById('btnNext').addEventListener('click', randomLayout);
+document.getElementById('btnNext').addEventListener('click', ()=>{ if (S.mode==='quiz') newQuestion(); else randomLayout(); });
 document.getElementById('btnAnswer').addEventListener('click', function(){
   S.showAnswer = !S.showAnswer;
   this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
