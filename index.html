@@ -50,6 +50,9 @@
     background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px;
     padding:7px 10px; font-size:13px; font-family:inherit; cursor:pointer;
   }
+  .aim-ctl{display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);}
+  .aim-ctl input{width:110px; accent-color:var(--brass);}
+  .aim-ctl .btn{padding:5px 10px; font-size:12px;}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
   #wrap2d, #wrap3d{
@@ -129,6 +132,10 @@
     <option value="left">借左短库（底库）</option>
     <option value="right">借右短库（顶库）</option>
   </select>
+  <span class="aim-ctl">瞄准点
+    <input type="range" id="aimOff" min="-43" max="43" step="1" value="0">
+    <button class="btn" id="btnAimC">居中</button>
+  </span>
   <button class="btn" id="btnFan">袋口扇形 ◔</button>
   <span class="hint" id="hintText">拖动白球 / 红球 · 点击袋口选择目标袋</span>
 </div>
@@ -164,6 +171,7 @@
     <div class="card"><div class="lbl">难度评估</div><div class="val" id="diffVal">--</div></div>
     <div class="card"><div class="lbl">切球方向</div><div class="val small" id="sideVal">--</div></div>
     <div class="card"><div class="lbl">进袋判定</div><div class="val" id="potVal">--</div></div>
+    <div class="card"><div class="lbl">瞄准点 Aim point</div><div class="val small" id="aimVal">--</div></div>
     <div class="card"><div class="lbl">进袋窗口 Pot window</div><div class="val small" id="fanVal">--</div></div>
   </div>
 </div>
@@ -240,6 +248,7 @@ function buildPocketGeo(p){
     backA = {x:-1, y:0}; backB = {x:1, y:0};
   }
   const mouthMid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  const mw = Math.hypot(B.x-A.x, B.y-A.y), mouthDir = {x:(B.x-A.x)/mw, y:(B.y-A.y)/mw};
   /* back：沿库边面反向延伸的线段端点。与鼻圆同半径的胶囊，其表面恰好就是库边面，
      所以判定时球心被挡在「库边 + R」之外，斜着从库边穿出去的路径不会被算进袋。 */
   const noses = [{c:A, dir:dirA, back:backA}, {c:B, dir:dirB, back:backB}].map(n=>({
@@ -247,7 +256,7 @@ function buildPocketGeo(p){
     wall:{x:n.c.x+n.back.x*CUSHION_PROBE, y:n.c.y+n.back.y*CUSHION_PROBE}
   }));
   return {
-    corner: p.r === CORNER_R, axis:ax, mouthMid, noses,
+    corner: p.r === CORNER_R, axis:ax, mouthMid, mouthDir, noses,
     dropProj: mouthMid.x*ax.x + mouthMid.y*ax.y + DROP_DEPTH,
     drop: {x:mouthMid.x + ax.x*DROP_DEPTH, y:mouthMid.y + ax.y*DROP_DEPTH},
   };
@@ -292,6 +301,7 @@ const S = {
   pk: 5,
   showAnswer: true,
   showFan: true,
+  aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
   bank: null,      // null | 'top' | 'bottom' | 'left' | 'right'：借一库
   mode: 'free',
   view: '2d',
@@ -311,8 +321,14 @@ const BANKS = {
 function mirrorPt(q, b){
   return b.axis==='y' ? {x:q.x, y:2*b.v-q.y} : {x:2*b.v-q.x, y:q.y};
 }
+/* 最终瞄准点：袋心沿袋口方向平移 aimOff。不是每个球都该打袋口正中——
+   斜角进袋时瞄向远侧鼻、沿库球贴近一侧才更容易进。假想球公式不变，只是 pocket 点可调。 */
+function pocketAim(){
+  const p = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
+  return {x:p.x+md.x*S.aimOff, y:p.y+md.y*S.aimOff};
+}
 function aimTarget(){
-  const p = POCKETS[S.pk];
+  const p = pocketAim();
   return S.bank ? mirrorPt(p, BANKS[S.bank]) : p;
 }
 function bankCross(o, dir, b){          // 射线与反弹面的交点
@@ -425,7 +441,7 @@ function potJudge(){
 }
 /* 红球走的折线：直接进袋 [红球, 袋口]；借库 [红球, 反弹点, 袋口]（反弹点不在库边上时画到镜像袋口） */
 function routePoints(){
-  const p = POCKETS[S.pk], o = S.obj;
+  const p = pocketAim(), o = S.obj;
   if (!S.bank) return [o, p];
   const T = aimTarget(), b = BANKS[S.bank];
   const dd = dist(o,T)||1, dir = {x:(T.x-o.x)/dd, y:(T.y-o.y)/dd};
@@ -565,7 +581,7 @@ const pkEls = POCKETS.map((p,i)=>{
   const c = POCKET_GEO[i].drop;
   const ring = el('circle',{cx:c.x, cy:c.y, r:p.r+40, fill:'none', stroke:'#c9a45c', 'stroke-width':7, opacity:0});
   const hole = el('circle',{cx:c.x, cy:c.y, r:p.r+30, fill:'transparent', style:'cursor:pointer'});
-  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); S.pk=i; update(); });
+  hole.addEventListener('pointerdown', e=>{ e.stopPropagation(); if (S.pk!==i) setAimOff(0, true); S.pk=i; syncAimSlider(); update(); });
   return ring;
 });
 /* 瞄准线 + 假想球（答案层） */
@@ -582,6 +598,9 @@ const mirrorTxt = el('text',{fill:'#e8e2d6','font-size':52,'font-weight':600,'te
 mirrorTxt.textContent = '镜像袋口';
 const lnOP = el('polyline',{fill:'none', stroke:'#c9a45c','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
 const lnCG = el('line',{stroke:'#7ab8f5','stroke-width':5,'stroke-dasharray':'26 20'}, gAns);
+const aimHandle = el('g',{}, gAns);
+el('circle',{r:24, fill:'#c9a45c', opacity:0.85, stroke:'#1c1915','stroke-width':4}, aimHandle);
+el('circle',{r:8, fill:'#1c1915'}, aimHandle);
 const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'stroke-dasharray':'12 10'}, gAns);
 /* 撞鼻反弹可视化：只在会撞鼻时出现 */
 const gBounce = el('g',{opacity:0}, gAns);
@@ -621,7 +640,8 @@ svg.addEventListener('pointerdown', e=>{
     return;
   }
   const p = svgPoint(e);
-  if (S.mode==='free' && dist(p,S.cue)<80) drag2d='cue';
+  if (S.showAnswer && dist(p,pocketAim())<50) drag2d='aim';
+  else if (S.mode==='free' && dist(p,S.cue)<80) drag2d='cue';
   else if (S.mode==='free' && dist(p,S.obj)<80) drag2d='obj';
   else { drag2d='pan'; panStart={x:e.clientX, y:e.clientY, cx0:Z.cx, cy0:Z.cy}; }
   tapStart = {x:e.clientX, y:e.clientY, p};
@@ -638,7 +658,10 @@ svg.addEventListener('pointermove', e=>{
     e.preventDefault();
     return;
   }
-  if (drag2d==='cue' || drag2d==='obj'){
+  if (drag2d==='aim'){
+    const p = svgPoint(e), c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
+    setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
+  } else if (drag2d==='cue' || drag2d==='obj'){
     const p = svgPoint(e);
     const b = S[drag2d];
     b.x = clamp(p.x, -L/2+R, L/2-R);
@@ -908,7 +931,7 @@ function goPlayer(){
 /* ================= 随机出题 ================= */
 const BANDS = {any:[0,80], easy:[0,25], mid:[25,50], hard:[50,80]};
 function randomLayout(){
-  S.bank = null; document.getElementById('selBank').value = '';
+  S.bank = null; document.getElementById('selBank').value = ''; S.aimOff = 0;
   const band = BANDS[document.getElementById('selDiff').value];
   for (let i=0;i<400;i++){
     S.pk = Math.floor(Math.random()*6);
@@ -921,7 +944,7 @@ function randomLayout(){
     const a = cutAngle();
     if (a>=band[0] && a<=band[1]) break;
   }
-  update();
+  syncAimSlider(); update();
   if (camMode==='player') goPlayer();
 }
 
@@ -1078,6 +1101,8 @@ function update(){
   lnCG.setAttribute('x1',S.cue.x); lnCG.setAttribute('y1',S.cue.y);
   lnCG.setAttribute('x2',g.x); lnCG.setAttribute('y2',g.y);
   gAns.setAttribute('opacity', S.showAnswer?1:0);
+  const pa = pocketAim();
+  aimHandle.setAttribute('transform', `translate(${pa.x},${pa.y})`);
   const fan = potFan();
   const fanOn = S.showFan;
   const fo = fanOn ? fan.outer : null, fi = fanOn ? fan.inner : null;
@@ -1178,6 +1203,13 @@ function update(){
   const potCls = pj.status==='clear' ? 'easy' : (pj.status==='rattle' ? 'mid' : 'hard');
   pv.textContent = potTxt;
   pv.className = 'val '+potCls;
+  const aimSide = (()=>{   // 瞄准点相对行进方向偏左 / 偏右
+    if (Math.abs(S.aimOff)<0.5) return '袋口正中';
+    const o = S.obj, c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
+    const dx = c.x-o.x, dy = c.y-o.y, cr = dx*md.y - dy*md.x;   // >0：md 在行进方向右侧
+    return (cr*S.aimOff>0 ? '偏右 ' : '偏左 ')+Math.abs(Math.round(S.aimOff))+'mm';
+  })();
+  document.getElementById('aimVal').textContent = aimSide;
   document.getElementById('fanVal').textContent = fan.inner
     ? (fan.inner.hi-fan.inner.lo)*180/Math.PI < 0.05 ? '几乎为 0'
       : ((fan.inner.hi-fan.inner.lo)*180/Math.PI).toFixed(1)+'° · 袋口处 ≈'+Math.round(fan.widthMm)+'mm'
@@ -1187,7 +1219,7 @@ function update(){
   const ovCard = document.querySelector('.overlap-card');
   ovCard.classList.toggle('masked', !S.showAnswer);
   if (!S.showAnswer){
-    ['angVal','fullVal','cueDistVal','sideVal','diffVal','potVal','fanVal'].forEach(id=>{
+    ['angVal','fullVal','cueDistVal','sideVal','diffVal','potVal','fanVal','aimVal'].forEach(id=>{
       const e = document.getElementById(id);
       e.textContent = '？'; e.classList.remove('easy','mid','hard');
     });
@@ -1223,6 +1255,17 @@ document.getElementById('btnAnswer').addEventListener('click', function(){
   update();
   if (camMode==='player' && ready3) goPlayer();
 });
+function syncAimSlider(){
+  const r = POCKETS[S.pk].r, sl = document.getElementById('aimOff');
+  sl.min = -r; sl.max = r; sl.value = Math.round(S.aimOff);
+}
+function setAimOff(v, silent){
+  S.aimOff = clamp(v, -POCKETS[S.pk].r, POCKETS[S.pk].r);
+  document.getElementById('aimOff').value = Math.round(S.aimOff);
+  if (!silent) update();
+}
+document.getElementById('aimOff').addEventListener('input', e=> setAimOff(+e.target.value));
+document.getElementById('btnAimC').addEventListener('click', ()=> setAimOff(0));
 function setBank(v){
   S.bank = v || null;
   document.getElementById('selBank').value = S.bank || '';
