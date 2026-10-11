@@ -77,6 +77,8 @@
   }
   #wrap3d{display:none; height:520px;}
   #view2d{width:100%; display:block; touch-action:none;}
+  .nudge{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:6; display:flex; gap:10px;}
+  .nudge .btn{width:54px; height:44px; font-size:18px; padding:0; background:rgba(28,25,21,0.88); border-color:var(--brass-dim); touch-action:none; user-select:none; -webkit-user-select:none;}
   .cam-btns{position:absolute; top:10px; left:10px; display:flex; gap:6px; z-index:5;}
   .cam-btns .btn{font-size:12px; padding:5px 10px; background:rgba(28,25,21,0.85);}
   .hud3{position:absolute; inset:0; z-index:4; pointer-events:none; display:none; color:#fff; font-variant-numeric:tabular-nums;}
@@ -188,6 +190,10 @@
 </div>
 
 <div class="stage">
+  <div class="nudge" id="nudge" title="移动白球：键盘 ← → （Shift 微调）">
+    <button class="btn" id="btnNudgeL" aria-label="白球向左">◀</button>
+    <button class="btn" id="btnNudgeR" aria-label="白球向右">▶</button>
+  </div>
   <div id="wrap2d">
     <svg id="view2d" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="zoom-btns">
@@ -1063,7 +1069,7 @@ function goPlayer(quiet){
   tPos=c.clone().add(back.clone().multiplyScalar(0.45)); tPos.y=0.24;
   /* 视线落在白球前方 0.7m 处，让白球、球杆头和瞄准线都进入画面 */
   tLook=c.clone().add(back.clone().multiplyScalar(-0.7)); tLook.y=0.02;
-  if (!quiet) hint('第一人称：模拟趴下瞄准的视线高度');
+  if (!quiet) hint('第一人称：模拟趴下瞄准的视线高度' + ((S.mode==='free'||S.mode==='random') ? ' · ← → 移动白球' : ''));
   setHudMode();
 }
 function goThird(quiet){
@@ -1072,7 +1078,7 @@ function goThird(quiet){
   const back=c.clone().sub(gv).setY(0).normalize();
   tPos=c.clone().add(back.multiplyScalar(0.95)); tPos.y=0.55;
   tLook=gv.clone(); tLook.y=0.02;
-  if (!quiet) hint('第三人称：拖动白球，观察瞄准点和角度的变化');
+  if (!quiet) hint(S.mode==='free' ? '第三人称：拖动白球，或 ← → / 按钮微调' : S.mode==='random' ? '第三人称：← → / 按钮移动白球（拖动需切到「自由摆放」）' : '第三人称');
   setHudMode();
 }
 function followCam(){
@@ -1734,6 +1740,53 @@ document.getElementById('btnStatsClear').addEventListener('click', ()=>{
   if (window.confirm('确定清空所有测验记录？')){ qSave([]); showStats(); }
 });
 
+/* ================= 白球左右微调（键盘 ← → / 屏幕按钮；Shift = 微调 1mm，否则 4mm） =================
+   第一 / 第三人称：沿「垂直于出杆方向」平移（真正的左右）；2D / 上帝视角：沿台面 x 轴。 */
+function nudgeCue(sgn, fine){
+  if (S.mode!=='free' && S.mode!=='random') return;
+  const step = (fine?1:4)*sgn;
+  let rx = 1, ry = 0;
+  if (S.view==='3d' && camMode!=='top'){
+    const ref = S.showAnswer ? ghostPos() : S.obj;
+    const dx = ref.x-S.cue.x, dy = ref.y-S.cue.y, l = Math.hypot(dx,dy)||1;
+    rx = -dy/l; ry = dx/l;
+  }
+  const b = S.cue;
+  b.x = clamp(b.x+rx*step, -L/2+R, L/2-R);
+  b.y = clamp(b.y+ry*step, -W/2+R, W/2-R);
+  const o = S.obj;
+  if (dist(b,o) < 2*R+2){
+    const dx = b.x-o.x, dy = b.y-o.y, d = Math.hypot(dx,dy)||1;
+    b.x = o.x+dx/d*(2*R+2); b.y = o.y+dy/d*(2*R+2);
+  }
+  update(); followCam();
+}
+function syncNudge(){
+  document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random') ? 'flex' : 'none';
+}
+window.addEventListener('keydown', e=>{
+  if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+  const t = document.activeElement && document.activeElement.tagName;
+  if (t==='INPUT' || t==='SELECT' || t==='TEXTAREA') return;      // 滑条 / 下拉框自己吃方向键
+  if (document.getElementById('statsModal').style.display!=='none') return;
+  e.preventDefault();
+  nudgeCue(e.key==='ArrowRight' ? 1 : -1, e.shiftKey);
+});
+/* 按住按钮连续移动 */
+[['btnNudgeL',-1],['btnNudgeR',1]].forEach(([id,sgn])=>{
+  const btn = document.getElementById(id);
+  let t1 = null, t2 = null;
+  const stop = ()=>{ clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+  btn.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    try{ btn.setPointerCapture(e.pointerId); }catch(err){}
+    nudgeCue(sgn, false);
+    t1 = setTimeout(()=>{ t2 = setInterval(()=>nudgeCue(sgn,false), 50); }, 350);
+  });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev=> btn.addEventListener(ev, stop));
+  btn.addEventListener('contextmenu', e=>e.preventDefault());
+});
+
 /* ================= UI 事件 ================= */
 document.getElementById('segView').addEventListener('click', e=>{
   const b = e.target.closest('button'); if(!b) return;
@@ -1757,12 +1810,13 @@ document.getElementById('segMode').addEventListener('click', e=>{
   document.getElementById('btnAnswer').style.display = qz ? 'none' : '';
   document.getElementById('quizBar').style.display = qz ? '' : 'none';
   ['.aim-ctl','#selBank','#btnFan'].forEach(q=> document.querySelector(q).style.display = qz ? 'none' : '');   // 测验里不提供辅助
+  syncNudge();
   if (qz){ startQuiz(); return; }
   if (Q.on){                       // 离开测验：恢复显示答案
     Q.on = false; S.showAnswer = true;
     document.getElementById('btnAnswer').textContent = '隐藏答案 👁';
   }
-  hint(rnd?'点「换一题」生成新球形':'拖动白球 / 红球 · 点袋口选目标袋 · 点库边设置借库');
+  hint(rnd?'点「换一题」换新球形 · ← → 或按钮移动白球':'拖动白球 / 红球 · ← → 微调白球 · 点袋口选目标袋 · 点库边设置借库');
   if (rnd) randomLayout(); else update();
 });
 document.getElementById('btnNext').addEventListener('click', ()=>{ if (S.mode==='quiz') newQuestion(); else randomLayout(); });
@@ -1799,6 +1853,7 @@ document.getElementById('btnTop').addEventListener('click', goTop);
 document.getElementById('btnPlayer').addEventListener('click', ()=>goPlayer());
 document.getElementById('btnThird').addEventListener('click', ()=>goThird());
 
+syncNudge();
 update();
 </script>
 </body>
