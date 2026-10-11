@@ -228,6 +228,8 @@
       <button class="btn" id="btnThird">第三人称</button>
       <button class="btn" id="btnPlayer">第一人称</button>
       <button class="btn" id="btnInsets">小图</button>
+      <button class="btn" id="btnZin" aria-label="拉近">＋</button>
+      <button class="btn" id="btnZout" aria-label="拉远">－</button>
     </div>
     <div class="hud3" id="hud3">
       <div class="hud-stats">
@@ -905,7 +907,7 @@ document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -917,6 +919,19 @@ function setFan3(mesh, tris){
   mesh.geometry = g; mesh.visible = true;
 }
 let camPos, camLook, tPos, tLook, camMode='top';
+/* 缩放：在各机位的基准机位上，沿「机位→视点」方向推近 / 拉远；放大时视点逐渐移向目标球 */
+let zoom3 = 1, basePos = new THREE.Vector3(0,3.6,0.02), baseLook = new THREE.Vector3();
+const ZOOM3_MIN = 0.5, ZOOM3_MAX = 4;
+function applyZoom3(){
+  zoom3 = Math.min(ZOOM3_MAX, Math.max(ZOOM3_MIN, zoom3));
+  const obj = new THREE.Vector3(S.obj.x*MM, 0.03, S.obj.y*MM);
+  const look = baseLook.clone().lerp(obj, Math.min(1, Math.max(0, (zoom3-1)/1.5)));
+  const off = basePos.clone().sub(baseLook);
+  const len = Math.max(0.2, off.length()/zoom3);                 // 至少离视点 0.2m，别钻进球里
+  tPos = look.clone().add(off.normalize().multiplyScalar(len));
+  tLook = look;
+}
+function zoomBy(f){ zoom3 *= f; applyZoom3(); }
 /* 画质：低画质 = 关阴影 + 像素比 1（旧手机帧率不够时用） */
 let QLOW = false;
 try{ QLOW = localStorage.getItem('snooker-q')==='low'; }catch(e){}
@@ -1058,8 +1073,12 @@ function init3d(){
   }
   ball3.cue = mkBall(0xf3eee0);
   ball3.obj = mkBall(0xc8342b);
-  ghost3 = new THREE.Mesh(new THREE.SphereGeometry(Rm,16,12), new THREE.MeshBasicMaterial({color:0xffffff, wireframe:true, transparent:true, opacity:0.7}));
+  /* 假想球：半透明实心球 + 脚下一圈白环，看得清位置又不挡住红球 */
+  ghost3 = new THREE.Mesh(new THREE.SphereGeometry(Rm,32,20), new THREE.MeshStandardMaterial({color:0xffffff, transparent:true, opacity:0.34, roughness:0.25, metalness:0, depthWrite:false}));
+  ghost3.renderOrder = 2;
   scene3.add(ghost3);
+  ghostRing3 = new THREE.Mesh(new THREE.RingGeometry(Rm*0.9, Rm, 48), new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.85, side:THREE.DoubleSide, depthWrite:false}));
+  ghostRing3.rotation.x = -Math.PI/2; scene3.add(ghostRing3);
   function dash(color){
     const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
     const l=new THREE.Line(g,new THREE.LineDashedMaterial({color:color,dashSize:0.05,gapSize:0.04}));
@@ -1109,7 +1128,14 @@ function init3d(){
     mv.y=-((e.clientY-r.top)/r.height)*2+1;
     ray.setFromCamera(mv,cam3);
   }
+  /* 缩放：滚轮 / 双指捏合 */
+  renderer3.domElement.addEventListener('wheel', e=>{ e.preventDefault(); zoomBy(e.deltaY<0 ? 1.12 : 1/1.12); }, {passive:false});
+  const pointers3 = new Map(); let pinch3 = null;
+  const pdist = ()=>{ const p=[...pointers3.values()]; return Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y) || 1; };
   renderer3.domElement.addEventListener('pointerdown',e=>{
+    pointers3.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if (pointers3.size===2){ drag3 = null; pinch3 = {d0:pdist(), z0:zoom3}; e.preventDefault(); return; }
+    if (pointers3.size>2) return;
     if (Q.on && Q.type==='ghost' && Q.phase==='ask' && camMode==='top'){
       setRay(e);
       const qh=new THREE.Vector3();
@@ -1147,6 +1173,8 @@ function init3d(){
     }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
+    if (pointers3.has(e.pointerId)) pointers3.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if (pinch3 && pointers3.size>=2){ zoom3 = pinch3.z0 * pdist()/pinch3.d0; applyZoom3(); e.preventDefault(); return; }
     if(!drag3) return;
     setRay(e);
     const hit=new THREE.Vector3();
@@ -1163,7 +1191,9 @@ function init3d(){
     if (camMode==='third') goThird(true);
     e.preventDefault();
   });
-  window.addEventListener('pointerup',()=>{drag3=null;});
+  const up3 = e=>{ pointers3.delete(e.pointerId); if (pointers3.size<2) pinch3 = null; if (pointers3.size===0) drag3 = null; };
+  window.addEventListener('pointerup', up3);
+  window.addEventListener('pointercancel', up3);
 
   (function loop(){
     requestAnimationFrame(loop);
@@ -1183,8 +1213,8 @@ function resize3d(){
 }
 function goTop(){
   camMode='top';
-  tPos.set(0,3.6,0.02); tLook.set(0,0,0);
-  hint('上帝视角：拖动球（自由摆放）· 点袋口选目标袋');
+  basePos = new THREE.Vector3(0,3.6,0.02); baseLook = new THREE.Vector3(0,0,0); applyZoom3();
+  hint('上帝视角：拖动球（自由摆放）· 点袋口选目标袋 · 滚轮 / 双指 / ＋－ 缩放');
   setHudMode();
 }
 function setHudMode(){
@@ -1201,9 +1231,10 @@ function goPlayer(quiet){
   camMode='player';
   const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM), gv=camRefPoint();
   const back=c.clone().sub(gv).setY(0).normalize();
-  tPos=c.clone().add(back.clone().multiplyScalar(0.45)); tPos.y=0.24;
+  basePos = c.clone().add(back.clone().multiplyScalar(0.45)); basePos.y = 0.24;
   /* 视线落在白球前方 0.7m 处，让白球、球杆头和瞄准线都进入画面 */
-  tLook=c.clone().add(back.clone().multiplyScalar(-0.7)); tLook.y=0.02;
+  baseLook = c.clone().add(back.clone().multiplyScalar(-0.7)); baseLook.y = 0.02;
+  applyZoom3();
   if (!quiet) hint('第一人称：模拟趴下瞄准的视线高度' + ((S.mode==='free'||S.mode==='random') ? ' · ← → 移动白球' : ''));
   setHudMode();
 }
@@ -1211,8 +1242,9 @@ function goThird(quiet){
   camMode='third';
   const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM), gv=camRefPoint();
   const back=c.clone().sub(gv).setY(0).normalize();
-  tPos=c.clone().add(back.multiplyScalar(0.95)); tPos.y=0.55;
-  tLook=gv.clone(); tLook.y=0.02;
+  basePos = c.clone().add(back.multiplyScalar(0.95)); basePos.y = 0.55;
+  baseLook = gv.clone(); baseLook.y = 0.02;
+  applyZoom3();
   if (!quiet) hint(S.mode==='free' ? '第三人称：拖动白球，或 ← → / 按钮微调' : S.mode==='random' ? '第三人称：← → / 按钮移动白球（拖动需切到「自由摆放」）' : '第三人称');
   setHudMode();
 }
@@ -1407,18 +1439,19 @@ function update3dTraining(g){
   const route = routePoints();
   hudPts.pot = V3(o.x+(route[1].x-o.x)*0.55, 0.003, o.y+(route[1].y-o.y)*0.55);
   hudPts.aim = V3(c.x+(g.x-c.x)*0.5, 0.003, c.y+(g.y-c.y)*0.5);
-  const am = a0+da/2;
-  hudPts.ang = V3(g.x+Math.cos(am)*(ar+60), 0.003, g.y+Math.sin(am)*(ar+60));
+  /* 角度读数：锚在两球中点的正上方，再在屏幕上往上抬，不遮住红球和假想球 */
+  hudPts.ang = V3((o.x+g.x)/2, 0.085, (o.y+g.y)/2);
 }
 function placeHudLabels(){
   const hud = document.getElementById('hud3');
   if (hud.style.display==='none' || !hudPts.pot) return;
   const w = wrap3d.clientWidth, h = wrap3d.clientHeight;
-  [['lblPot',hudPts.pot,8,-26],['lblAim',hudPts.aim,10,-6],['lblAng',hudPts.ang,0,-10]].forEach(([id,p,ox,oy])=>{
+  [['lblPot',hudPts.pot,8,-26],['lblAim',hudPts.aim,10,-6],['lblAng',hudPts.ang,0,camMode==='top'?-34:-16]].forEach(([id,p,ox,oy])=>{
     const e = document.getElementById(id), v = p.clone().project(cam3);
     if (v.z>1 || camMode==='top' && id!=='lblAng'){ e.style.display='none'; return; }
     e.style.display = 'block';
-    e.style.transform = `translate(${(v.x*0.5+0.5)*w+ox}px, ${(-v.y*0.5+0.5)*h+oy}px)`;
+    const x = (v.x*0.5+0.5)*w+ox, y = (-v.y*0.5+0.5)*h+oy;
+    e.style.transform = id==='lblAng' ? `translate(${x}px, ${y}px) translate(-50%,-100%)` : `translate(${x}px, ${y}px)`;
   });
 }
 const thickNames = ['0','1/8','1/4','3/8','1/2','5/8','3/4','7/8','满'];
@@ -1574,6 +1607,7 @@ function update(){
     ball3.cue.position.set(S.cue.x*MM, R*MM, S.cue.y*MM);
     ball3.obj.position.set(S.obj.x*MM, R*MM, S.obj.y*MM);
     ghost3.position.set(g.x*MM, R*MM, g.y*MM);
+    ghostRing3.position.set(g.x*MM, 0.0035, g.y*MM);
     const dp = POCKET_GEO[S.pk].drop;
     ball3.target.position.set(dp.x*MM, 0.004, dp.y*MM);
     lnOP3.geometry.setFromPoints(routePoints().map(q=>new THREE.Vector3(q.x*MM, 0.003, q.y*MM)));
@@ -1584,7 +1618,7 @@ function update(){
       new THREE.Vector3(g.x*MM, 0.003, g.y*MM)]);
     lnCG3.computeLineDistances();
     update3dTraining(g);
-    ghost3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
+    ghost3.visible = ghostRing3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
     setFan3(fanOuter3, S.showAnswer ? triO : []);
     setFan3(fanInner3, S.showAnswer ? triI : []);
     quizRing3.visible = !!(Q.on && Q.guess);
@@ -1989,7 +2023,7 @@ window.addEventListener('keydown', e=>{
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v12');
+    add('版本缓存', 'v13');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2104,9 +2138,11 @@ document.getElementById('btnInsets').addEventListener('click', function(){
   const h = document.getElementById('hud3'), off = h.classList.toggle('noins');
   this.style.opacity = off ? 0.5 : 1;
 });
-document.getElementById('btnTop').addEventListener('click', goTop);
-document.getElementById('btnPlayer').addEventListener('click', ()=>goPlayer());
-document.getElementById('btnThird').addEventListener('click', ()=>goThird());
+document.getElementById('btnZin').addEventListener('click', ()=>{ if (ready3) zoomBy(1.3); });
+document.getElementById('btnZout').addEventListener('click', ()=>{ if (ready3) zoomBy(1/1.3); });
+document.getElementById('btnTop').addEventListener('click', ()=>{ zoom3 = 1; goTop(); });
+document.getElementById('btnPlayer').addEventListener('click', ()=>{ zoom3 = 1; goPlayer(); });
+document.getElementById('btnThird').addEventListener('click', ()=>{ zoom3 = 1; goThird(); });
 
 syncNudge();
 update();
