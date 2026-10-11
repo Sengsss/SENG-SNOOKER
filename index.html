@@ -77,6 +77,7 @@
   }
   #wrap3d{display:none; height:520px;}
   #view2d{width:100%; display:block; touch-action:none;}
+  .tools-row{display:contents;}
   .nudge{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:6; display:flex; gap:10px;}
   .nudge .btn{width:54px; height:44px; font-size:18px; padding:0; background:rgba(28,25,21,0.88); border-color:var(--brass-dim); touch-action:none; user-select:none; -webkit-user-select:none;}
   .cam-btns{position:absolute; top:10px; left:10px; display:flex; gap:6px; z-index:5;}
@@ -91,7 +92,7 @@
   .inset-l{left:10px;} .inset-r{right:10px;}
   .inset-title{position:absolute; left:0; right:0; top:0; z-index:1; background:rgba(0,0,0,.85); font-size:11px; padding:2px 6px;}
   .inset svg{position:absolute; inset:0; width:100%; height:100%; display:block;}
-  .hud3.notop .inset{display:block;} .hud3.top .inset{display:none;}
+  .hud3.notop .inset{display:block;} .hud3.top .inset{display:none;} .hud3.noins .inset{display:none !important;}
   .zoom-btns{position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:5;}
   .zoom-btns .btn{font-size:16px; padding:4px 12px; line-height:1.4; background:rgba(28,25,21,0.85);}
   .panel-row{
@@ -123,10 +124,30 @@
   #potVal.easy{color:var(--good);} #potVal.mid{color:var(--warn);} #potVal.hard{color:var(--hard);}
   footer{width:100%; max-width:1080px; margin-top:14px; font-size:12px; color:var(--muted); line-height:1.8;}
   footer b{color:var(--brass);}
+  /* 手机：缩放 / 移球按钮放到球台下面一排，不再盖住小小的球台 */
+  @media (max-width:760px){
+    .tools-row{display:flex; justify-content:center; align-items:center; gap:22px; margin-top:8px;}
+    .zoom-btns, .nudge{position:static; transform:none;}
+    .zoom-btns .btn{font-size:20px; padding:6px 16px; background:var(--panel2);}
+    .nudge .btn{background:var(--panel2);}
+  }
+  /* 触屏：控件至少约 40px 高，手指好点 */
+  @media (pointer:coarse){
+    .seg button{padding:11px 14px;}
+    .btn{padding:10px 14px;}
+    select{padding:10px 10px;}
+    .aim-ctl input{height:34px; width:130px;}
+    .ovpick button{padding:10px 11px;}
+    .aim-ctl .btn{padding:8px 12px;}
+  }
   @media (max-width:640px){
     .hint{display:none;}
     .card .val{font-size:18px;}
-    #wrap3d{height:380px;}
+    #wrap3d{height:470px;}
+    .inset{width:min(30%,120px);}
+    .hud-stats{top:46px; font-size:13px;} .hud-stats b{font-size:15px;}
+    .cam-btns{flex-wrap:wrap; right:10px;}
+    .cam-btns .btn{padding:6px 10px;}
   }
 </style>
 </head>
@@ -190,23 +211,15 @@
 </div>
 
 <div class="stage">
-  <div class="nudge" id="nudge" title="移动白球：键盘 ← → （Shift 微调）">
-    <button class="btn" id="btnNudgeL" aria-label="白球向左">◀</button>
-    <button class="btn" id="btnNudgeR" aria-label="白球向右">▶</button>
-  </div>
   <div id="wrap2d">
     <svg id="view2d" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="zoom-btns">
-      <button class="btn" id="btnZoomOut">－</button>
-      <button class="btn" id="btnZoomReset">⤢</button>
-      <button class="btn" id="btnZoomIn">＋</button>
-    </div>
   </div>
   <div id="wrap3d">
     <div class="cam-btns">
       <button class="btn" id="btnTop">上帝视角</button>
       <button class="btn" id="btnThird">第三人称</button>
       <button class="btn" id="btnPlayer">第一人称</button>
+      <button class="btn" id="btnInsets">小图</button>
     </div>
     <div class="hud3" id="hud3">
       <div class="hud-stats">
@@ -219,6 +232,17 @@
       <div class="hud-lbl ang" id="lblAng">--</div>
       <div class="inset inset-l" id="insetL"><div class="inset-title">局部俯视</div><svg id="insTop" viewBox="-95 -105 190 235" preserveAspectRatio="xMidYMid slice"></svg></div>
       <div class="inset inset-r" id="insetR"><div class="inset-title" id="insPTitle">袋口瞄准点</div><svg id="insPocket" viewBox="-105 -125 210 250" preserveAspectRatio="xMidYMid slice"></svg></div>
+    </div>
+  </div>
+  <div class="tools-row">
+    <div class="zoom-btns" id="zoomBtns">
+      <button class="btn" id="btnZoomOut">－</button>
+      <button class="btn" id="btnZoomReset">⤢</button>
+      <button class="btn" id="btnZoomIn">＋</button>
+    </div>
+    <div class="nudge" id="nudge" title="移动白球：键盘 ← → （Shift 微调）">
+    <button class="btn" id="btnNudgeL" aria-label="白球向左">◀</button>
+    <button class="btn" id="btnNudgeR" aria-label="白球向右">▶</button>
     </div>
   </div>
 </div>
@@ -698,6 +722,11 @@ const qErr = el('line',{stroke:'#e05c5c','stroke-width':5}, gQuiz);
 const qGuess = el('circle',{r:R, fill:'#c9a45c','fill-opacity':0.28, stroke:'#c9a45c','stroke-width':5}, gQuiz);
 const qDot = el('circle',{r:6, fill:'#c9a45c'}, gQuiz);
 
+/* 触控热区：按屏幕像素保底（约 26px 半径），放大后自然回到 mm 规格 */
+function hitR(mm){
+  const pxPerMm = svg.getBoundingClientRect().width / (BASE_VB.w/Z.scale);
+  return Math.max(mm, 22/(pxPerMm||1));
+}
 function svgPoint(evt){
   const p = svg.createSVGPoint();
   p.x=evt.clientX; p.y=evt.clientY;
@@ -705,6 +734,7 @@ function svgPoint(evt){
 }
 /* 拖球 / 单指平移 / 双指缩放：三种手势共用同一套 pointer 事件 */
 let tapStart=null;       // 点按候选：未移动就抬起 → 点库边设置借库
+let dragOff={x:0,y:0};   // 抓取点相对球心的偏移（mm）
 let drag2d=null;         // 'cue' | 'obj' | 'pan' | null
 let panStart=null;       // {x,y: 按下时的屏幕像素, cx0,cy0: 按下时的视图中心(mm)}
 let pinchStart=null;     // {d0: 双指初始间距(px), scale0,cx0,cy0}
@@ -720,10 +750,14 @@ svg.addEventListener('pointerdown', e=>{
     return;
   }
   const p = svgPoint(e);
-  if (Q.on && Q.type==='ghost' && Q.phase==='ask' && Q.guess && dist(p,Q.guess)<90) drag2d='guess';
-  else if (S.showAnswer && dist(p,pocketAim())<50) drag2d='aim';
-  else if (S.mode==='free' && dist(p,S.cue)<80) drag2d='cue';
-  else if (S.mode==='free' && dist(p,S.obj)<80) drag2d='obj';
+  /* 候选目标：按「离中心距离 / 热区半径」取最小者，几个热区重叠时抓到离手指最近的 */
+  const cands = [];
+  if (Q.on && Q.type==='ghost' && Q.phase==='ask' && Q.guess) cands.push(['guess', Q.guess, 90]);
+  if (S.showAnswer) cands.push(['aim', pocketAim(), 50]);
+  if (S.mode==='free'){ cands.push(['cue', S.cue, 80]); cands.push(['obj', S.obj, 80]); }
+  let best = null;
+  cands.forEach(([k,pt,mm])=>{ const r = dist(p,pt)/hitR(mm); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
+  if (best){ drag2d = best.k; dragOff = {x:best.pt.x-p.x, y:best.pt.y-p.y}; }   // 记下抓取偏移，球不会跳到指尖下
   else { drag2d='pan'; panStart={x:e.clientX, y:e.clientY, cx0:Z.cx, cy0:Z.cy}; }
   tapStart = {x:e.clientX, y:e.clientY, p};
   e.preventDefault();
@@ -740,15 +774,16 @@ svg.addEventListener('pointermove', e=>{
     return;
   }
   if (drag2d==='guess'){
-    setGuess(svgPoint(e));
+    const p = svgPoint(e);
+    setGuess({x:p.x+dragOff.x, y:p.y+dragOff.y});
   } else if (drag2d==='aim'){
-    const p = svgPoint(e), c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
+    const p0 = svgPoint(e), p = {x:p0.x+dragOff.x, y:p0.y+dragOff.y}, c = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
     setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
   } else if (drag2d==='cue' || drag2d==='obj'){
     const p = svgPoint(e);
     const b = S[drag2d];
-    b.x = clamp(p.x, -L/2+R, L/2-R);
-    b.y = clamp(p.y, -W/2+R, W/2-R);
+    b.x = clamp(p.x+dragOff.x, -L/2+R, L/2-R);
+    b.y = clamp(p.y+dragOff.y, -W/2+R, W/2-R);
     /* 防止两球重叠 */
     const other = drag2d==='cue'?S.obj:S.cue;
     if (dist(b,other) < 2*R+2){
@@ -988,7 +1023,7 @@ function init3d(){
   /* 3D 拖球（上帝视角 + 自由模式） */
   const ray=new THREE.Raycaster(), mv=new THREE.Vector2();
   const plane=new THREE.Plane(new THREE.Vector3(0,1,0), -Rm);
-  let drag3=null;
+  let drag3=null, dragOff3={x:0,y:0};
   function setRay(e){
     const r=renderer3.domElement.getBoundingClientRect();
     mv.x=((e.clientX-r.left)/r.width)*2-1;
@@ -1007,9 +1042,18 @@ function init3d(){
     const hit=new THREE.Vector3();
     if(!ray.ray.intersectPlane(plane,hit)) return;
     const pm={x:hit.x/MM, y:hit.z/MM};
-    if (dist(pm,S.cue)<90) drag3='cue';
-    else if (dist(pm,S.obj)<90) drag3='obj';
-    if(drag3) e.preventDefault();
+    /* 热区半径：至少 90mm，且屏幕上不小于 ~22px（手机上球台被缩得很小）；取离手指最近的球 */
+    const cw3 = renderer3.domElement.clientWidth, ch3 = renderer3.domElement.clientHeight;
+    let best = null;
+    [['cue',S.cue],['obj',S.obj]].forEach(([k,b])=>{
+      const a0 = new THREE.Vector3(b.x*MM, Rm, b.y*MM).project(cam3);
+      const a1 = new THREE.Vector3(b.x*MM+0.1, Rm, b.y*MM).project(cam3);
+      const pxPer100 = Math.hypot((a1.x-a0.x)*cw3/2, (a1.y-a0.y)*ch3/2) || 1;
+      const rad = Math.max(90, 22/(pxPer100/100));
+      const r = dist(pm,b)/rad;
+      if (r<1 && (!best || r<best.r)) best = {k, r, b};
+    });
+    if (best){ drag3 = best.k; dragOff3 = {x:best.b.x-pm.x, y:best.b.y-pm.y}; e.preventDefault(); }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
     if(!drag3) return;
@@ -1017,8 +1061,8 @@ function init3d(){
     const hit=new THREE.Vector3();
     if(!ray.ray.intersectPlane(plane,hit)) return;
     const b=S[drag3];
-    b.x=clamp(hit.x/MM,-L/2+R,L/2-R);
-    b.y=clamp(hit.z/MM,-W/2+R,W/2-R);
+    b.x=clamp(hit.x/MM+dragOff3.x,-L/2+R,L/2-R);
+    b.y=clamp(hit.z/MM+dragOff3.y,-W/2+R,W/2-R);
     const other = drag3==='cue'?S.obj:S.cue;
     if (dist(b,other)<2*R+2){
       const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
@@ -1795,6 +1839,7 @@ document.getElementById('segView').addEventListener('click', e=>{
   S.view = b.dataset.v;
   document.getElementById('wrap2d').style.display = S.view==='2d'?'':'none';
   document.getElementById('wrap3d').style.display = S.view==='3d'?'block':'none';
+  document.getElementById('zoomBtns').style.display = S.view==='2d'?'':'none';
   if (S.view==='3d'){ init3d(); resize3d(); goTop(); update(); }
   else hint(S.mode==='free'?'拖动白球 / 红球 · 点击袋口选择目标袋':'点「换一题」生成新球形');
 });
@@ -1848,6 +1893,10 @@ document.getElementById('btnFan').addEventListener('click', function(){
   S.showFan = !S.showFan;
   this.style.opacity = S.showFan ? 1 : 0.5;
   update();
+});
+document.getElementById('btnInsets').addEventListener('click', function(){
+  const h = document.getElementById('hud3'), off = h.classList.toggle('noins');
+  this.style.opacity = off ? 0.5 : 1;
 });
 document.getElementById('btnTop').addEventListener('click', goTop);
 document.getElementById('btnPlayer').addEventListener('click', ()=>goPlayer());
