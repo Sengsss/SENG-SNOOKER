@@ -63,6 +63,17 @@
   #view2d{width:100%; display:block; touch-action:none;}
   .cam-btns{position:absolute; top:10px; left:10px; display:flex; gap:6px; z-index:5;}
   .cam-btns .btn{font-size:12px; padding:5px 10px; background:rgba(28,25,21,0.85);}
+  .hud3{position:absolute; inset:0; z-index:4; pointer-events:none; display:none; color:#fff; font-variant-numeric:tabular-nums;}
+  .hud-stats{position:absolute; left:12px; top:50px; display:grid; gap:2px; font-size:15px; text-shadow:0 1px 3px #000, 0 0 6px #000;}
+  .hud-stats span{display:inline-block; width:3.2em; color:#e8e2d6; opacity:.9;}
+  .hud-stats b{font-weight:600; font-size:17px;}
+  .hud-lbl{position:absolute; left:0; top:0; font-size:14px; font-weight:600; padding:1px 7px; border-radius:4px; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.35); white-space:nowrap; display:none;}
+  .hud-lbl.ang{background:none; border:none; color:#f2e04a; text-shadow:0 1px 3px #000; font-size:16px;}
+  .inset{position:absolute; bottom:10px; width:min(34%,190px); aspect-ratio:190/235; border:2px solid #d9d2c0; border-radius:8px; overflow:hidden; background:#0b0b0b; box-shadow:0 2px 10px rgba(0,0,0,.6);}
+  .inset-l{left:10px;} .inset-r{right:10px;}
+  .inset-title{position:absolute; left:0; right:0; top:0; z-index:1; background:rgba(0,0,0,.85); font-size:11px; padding:2px 6px;}
+  .inset svg{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .hud3.notop .inset{display:block;} .hud3.top .inset{display:none;}
   .zoom-btns{position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:5;}
   .zoom-btns .btn{font-size:16px; padding:4px 12px; line-height:1.4; background:rgba(28,25,21,0.85);}
   .panel-row{
@@ -152,7 +163,20 @@
   <div id="wrap3d">
     <div class="cam-btns">
       <button class="btn" id="btnTop">上帝视角</button>
-      <button class="btn" id="btnPlayer">击球视角</button>
+      <button class="btn" id="btnThird">第三人称</button>
+      <button class="btn" id="btnPlayer">第一人称</button>
+    </div>
+    <div class="hud3" id="hud3">
+      <div class="hud-stats">
+        <div><span>角度</span><b id="hAng">--</b></div>
+        <div><span>横移</span><b id="hShift">--</b></div>
+        <div><span>薄度</span><b id="hThick">--</b></div>
+      </div>
+      <div class="hud-lbl" id="lblPot">进球线</div>
+      <div class="hud-lbl" id="lblAim">瞄准线</div>
+      <div class="hud-lbl ang" id="lblAng">--</div>
+      <div class="inset inset-l" id="insetL"><div class="inset-title">局部俯视</div><svg id="insTop" viewBox="-95 -105 190 235" preserveAspectRatio="xMidYMid slice"></svg></div>
+      <div class="inset inset-r" id="insetR"><div class="inset-title" id="insPTitle">袋口瞄准点</div><svg id="insPocket" viewBox="-105 -125 210 250" preserveAspectRatio="xMidYMid slice"></svg></div>
     </div>
   </div>
 </div>
@@ -262,6 +286,21 @@ function buildPocketGeo(p){
   };
 }
 const POCKET_GEO = POCKETS.map(buildPocketGeo);
+/* 袋口喉道黑底多边形（2D / 3D / 袋口小图共用）：从鼻圆内缘沿喉道斜面铺到袋底，再接圆形袋底 */
+function throatShape(g){
+  const [na, nb] = g.noses;
+  const shift = g.corner ? 0 : NOSE_R;      // 中袋要把黑底补到台呢边缘
+  const inner = n=>{
+    const px = -n.dir.y, py = n.dir.x;
+    const sg = Math.sign((g.mouthMid.x-n.c.x)*px + (g.mouthMid.y-n.c.y)*py) || 1;
+    return {x:px*sg*NOSE_R - g.axis.x*shift, y:py*sg*NOSE_R - g.axis.y*shift, ex:px*sg*NOSE_R, ey:py*sg*NOSE_R};
+  };
+  const ia = inner(na), ib = inner(nb);
+  const q = [
+    {x:na.c.x+ia.x, y:na.c.y+ia.y}, {x:na.end.x+ia.ex, y:na.end.y+ia.ey},
+    {x:nb.end.x+ib.ex, y:nb.end.y+ib.ey}, {x:nb.c.x+ib.x, y:nb.c.y+ib.y}];
+  return {q, disc:{cx:(q[1].x+q[2].x)/2, cy:(q[1].y+q[2].y)/2, r:Math.hypot(q[1].x-q[2].x, q[1].y-q[2].y)/2}};
+}
 /* 自检：鼻圆须与库边面相切、净距须等于规格口宽（2D/3D/判定共用这份数据，改数值后这里会告警） */
 POCKET_GEO.forEach((g,i)=>{
   const p = POCKETS[i], [a,b] = g.noses;
@@ -540,21 +579,11 @@ function el(tag, attrs, parent){
 /* 木框 + 台呢 */
 el('rect',{x:-L/2-CUSHION-30, y:-W/2-CUSHION-30, width:L+2*CUSHION+60, height:W+2*CUSHION+60, rx:34, fill:'#4a3421'});
 el('rect',{x:-L/2, y:-W/2, width:L, height:W, fill:'#35794B'});
-/* 袋口喉道底色（黑）：从鼻圆内缘沿喉道斜面铺到袋底，再接圆形袋底 */
+/* 袋口喉道底色（黑） */
 POCKET_GEO.forEach(g=>{
-  const [na, nb] = g.noses;
-  const shift = g.corner ? 0 : NOSE_R;      // 中袋要把黑底补到台呢边缘
-  const inner = n=>{
-    const px = -n.dir.y, py = n.dir.x;
-    const sg = Math.sign((g.mouthMid.x-n.c.x)*px + (g.mouthMid.y-n.c.y)*py) || 1;
-    return {x:px*sg*NOSE_R - g.axis.x*shift, y:py*sg*NOSE_R - g.axis.y*shift, ex:px*sg*NOSE_R, ey:py*sg*NOSE_R};
-  };
-  const ia = inner(na), ib = inner(nb);
-  const q = [
-    {x:na.c.x+ia.x, y:na.c.y+ia.y}, {x:na.end.x+ia.ex, y:na.end.y+ia.ey},
-    {x:nb.end.x+ib.ex, y:nb.end.y+ib.ey}, {x:nb.c.x+ib.x, y:nb.c.y+ib.y}];
-  el('polygon',{points:q.map(v=>v.x+','+v.y).join(' '), fill:'#050403'});
-  el('circle',{cx:(q[1].x+q[2].x)/2, cy:(q[1].y+q[2].y)/2, r:Math.hypot(q[1].x-q[2].x, q[1].y-q[2].y)/2, fill:'#050403'});
+  const t = throatShape(g);
+  el('polygon',{points:t.q.map(v=>v.x+','+v.y).join(' '), fill:'#050403'});
+  el('circle',{cx:t.disc.cx, cy:t.disc.cy, r:t.disc.r, fill:'#050403'});
 });
 /* 库边：6 段独立矩形，端头由喉道斜面（胶囊）的鼻圆接上 */
 CUSHIONS.forEach(seg=>{
@@ -717,7 +746,8 @@ document.getElementById('btnZoomReset').addEventListener('click', ()=>{ Z.scale=
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3;
+let bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
   if (!tris.length){ mesh.visible = false; return; }
@@ -793,22 +823,12 @@ function init3d(){
   /* 袋口：喉道黑底（与 2D 同一多边形）+ 鼻圆柱 + 喉道斜面 */
   const holeM = new THREE.MeshBasicMaterial({color:0x050403});
   POCKET_GEO.forEach(g=>{
-    const [na, nb] = g.noses;
-    const shift = g.corner ? 0 : NOSE_R;
-    const inner = n=>{
-      const px=-n.dir.y, py=n.dir.x;
-      const sg = Math.sign((g.mouthMid.x-n.c.x)*px + (g.mouthMid.y-n.c.y)*py) || 1;
-      return {sx:px*sg*NOSE_R - g.axis.x*shift, sy:py*sg*NOSE_R - g.axis.y*shift, ex:px*sg*NOSE_R, ey:py*sg*NOSE_R};
-    };
-    const ia=inner(na), ib=inner(nb);
-    const q=[[na.c.x+ia.sx, na.c.y+ia.sy],[na.end.x+ia.ex, na.end.y+ia.ey],
-             [nb.end.x+ib.ex, nb.end.y+ib.ey],[nb.c.x+ib.sx, nb.c.y+ib.sy]];
-    const shp=new THREE.Shape(q.map(v=>new THREE.Vector2(v[0]*MM, -v[1]*MM)));
+    const t = throatShape(g);
+    const shp=new THREE.Shape(t.q.map(v=>new THREE.Vector2(v.x*MM, -v.y*MM)));
     const poly=new THREE.Mesh(new THREE.ShapeGeometry(shp), holeM);
     poly.rotation.x=-Math.PI/2; poly.position.y=0.002; scene3.add(poly);
-    const ex=(q[1][0]+q[2][0])/2, ey=(q[1][1]+q[2][1])/2, er=Math.hypot(q[1][0]-q[2][0], q[1][1]-q[2][1])/2;
-    const disc=new THREE.Mesh(new THREE.CylinderGeometry(er*MM, er*MM, 0.004, 24), holeM);
-    disc.position.set(ex*MM, 0.002, ey*MM); scene3.add(disc);
+    const disc=new THREE.Mesh(new THREE.CylinderGeometry(t.disc.r*MM, t.disc.r*MM, 0.004, 24), holeM);
+    disc.position.set(t.disc.cx*MM, 0.002, t.disc.cy*MM); scene3.add(disc);
     g.noses.forEach(n=>{
       [n.c, n.end].forEach(pt=>{
         const cyl=new THREE.Mesh(new THREE.CylinderGeometry(NOSE_R*MM, NOSE_R*MM, 0.045, 16), cushM);
@@ -855,6 +875,28 @@ function init3d(){
   scene3.add(bounceRing3);
   bounceLine3 = dash(0xe05c5c);
 
+  /* 击球训练辅助：瞄准线两侧边线（白球外缘）、接触点、角度弧、球杆 */
+  function dashW(){
+    const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+    const l=new THREE.Line(g,new THREE.LineDashedMaterial({color:0xffffff,dashSize:0.03,gapSize:0.03,transparent:true,opacity:0.85}));
+    scene3.add(l); return l;
+  }
+  edgeL3 = dashW(); edgeR3 = dashW();
+  contact3 = new THREE.Mesh(new THREE.SphereGeometry(0.0042,12,8), new THREE.MeshBasicMaterial({color:0xff3b30}));
+  scene3.add(contact3);
+  arc3 = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color:0xf2e04a}));
+  scene3.add(arc3);
+  /* 球杆：局部坐标里杆头在原点，杆尾沿 +Y */
+  cue3 = new THREE.Group();
+  function cyl(rt, rb, h, y, color){
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 14), new THREE.MeshLambertMaterial({color}));
+    m.position.y = y; cue3.add(m);
+  }
+  cyl(0.0052, 0.0052, 0.012, 0.006, 0x3a6ea5);        // 皮头
+  cyl(0.0095, 0.0052, 0.70, 0.012+0.35, 0xe7c98f);     // 前节（浅木）
+  cyl(0.0145, 0.0095, 0.75, 0.712+0.375, 0x2b1b12);    // 后把（深色）
+  scene3.add(cue3);
+
   camPos=new THREE.Vector3(0,3.6,0.02); camLook=new THREE.Vector3(0,0,0);
   tPos=camPos.clone(); tLook=camLook.clone();
 
@@ -869,7 +911,7 @@ function init3d(){
     ray.setFromCamera(mv,cam3);
   }
   renderer3.domElement.addEventListener('pointerdown',e=>{
-    if (camMode!=='top'||S.mode!=='free') return;
+    if (camMode==='player'||S.mode!=='free') return;
     setRay(e);
     const hit=new THREE.Vector3();
     if(!ray.ray.intersectPlane(plane,hit)) return;
@@ -892,15 +934,17 @@ function init3d(){
       b.x=other.x+dx/d*(2*R+2); b.y=other.y+dy/d*(2*R+2);
     }
     update();
+    if (camMode==='third') goThird(true);
     e.preventDefault();
   });
   window.addEventListener('pointerup',()=>{drag3=null;});
 
   (function loop(){
     requestAnimationFrame(loop);
-    camPos.lerp(tPos,0.08); camLook.lerp(tLook,0.08);
+    camPos.lerp(tPos,0.12); camLook.lerp(tLook,0.12);
     cam3.position.copy(camPos); cam3.lookAt(camLook);
     renderer3.render(scene3,cam3);
+    placeHudLabels();
   })();
 
   window.addEventListener('resize', resize3d);
@@ -915,17 +959,40 @@ function goTop(){
   camMode='top';
   tPos.set(0,3.6,0.02); tLook.set(0,0,0);
   hint('上帝视角：自由模式下可拖动球');
+  setHudMode();
 }
-function goPlayer(){
+function setHudMode(){
+  const h = document.getElementById('hud3');
+  h.classList.toggle('top', camMode==='top');
+  h.classList.toggle('notop', camMode!=='top');
+}
+/* 机位参照点：显示答案时看假想球；隐藏时只朝向红球，否则机位本身就泄露瞄准线 */
+function camRefPoint(){
+  const g = ghostPos();
+  return S.showAnswer ? new THREE.Vector3(g.x*MM, R*MM, g.y*MM) : new THREE.Vector3(S.obj.x*MM, R*MM, S.obj.y*MM);
+}
+function goPlayer(quiet){
   camMode='player';
-  const g=ghostPos();
-  const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM);
-  /* 隐藏答案时镜头只朝向红球，不能沿「白球→假想球」方向架机位，否则等于泄露瞄准线 */
-  const gv = S.showAnswer ? new THREE.Vector3(g.x*MM, R*MM, g.y*MM) : new THREE.Vector3(S.obj.x*MM, R*MM, S.obj.y*MM);
+  const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM), gv=camRefPoint();
   const back=c.clone().sub(gv).setY(0).normalize();
   tPos=c.clone().add(back.multiplyScalar(0.5)); tPos.y=0.28;
   tLook=gv.clone();
-  hint('击球视角：模拟趴下瞄准的视线高度');
+  if (!quiet) hint('第一人称：模拟趴下瞄准的视线高度');
+  setHudMode();
+}
+function goThird(quiet){
+  camMode='third';
+  const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM), gv=camRefPoint();
+  const back=c.clone().sub(gv).setY(0).normalize();
+  tPos=c.clone().add(back.multiplyScalar(0.95)); tPos.y=0.55;
+  tLook=gv.clone(); tLook.y=0.02;
+  if (!quiet) hint('第三人称：拖动白球，观察瞄准点和角度的变化');
+  setHudMode();
+}
+function followCam(){
+  if (!ready3) return;
+  if (camMode==='player') goPlayer(true);
+  else if (camMode==='third') goThird(true);
 }
 
 /* ================= 随机出题 ================= */
@@ -945,7 +1012,7 @@ function randomLayout(){
     if (a>=band[0] && a<=band[1]) break;
   }
   syncAimSlider(); update();
-  if (camMode==='player') goPlayer();
+  followCam();
 }
 
 /* ================= 叠球图（分数瞄准法） ================= */
@@ -1073,6 +1140,133 @@ function updateOverlap(aDeg, sideSign){
   return f;
 }
 
+/* ================= 击球训练：瞄准线三件套 / 接触点 / 角度弧 / 球杆 / HUD ================= */
+function V3(x,y,z){ return new THREE.Vector3(x*MM, y, z*MM); }
+function update3dTraining(g){
+  const show = S.showAnswer, c = S.cue, o = S.obj;
+  /* 球杆方向：显示答案 → 朝假想球；隐藏 → 朝红球（不泄露） */
+  const aimPt = show ? g : o;
+  let dx = aimPt.x-c.x, dy = aimPt.y-c.y; const dl = Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+  const tilt = 4*Math.PI/180;
+  const back = new THREE.Vector3(-dx*Math.cos(tilt), Math.sin(tilt), -dy*Math.cos(tilt)).normalize();
+  cue3.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), back);
+  const gap = R+14;
+  cue3.position.set((c.x-dx*gap)*MM, R*MM, (c.y-dy*gap)*MM);
+
+  edgeL3.visible = edgeR3.visible = contact3.visible = arc3.visible = show;
+  if (!show) return;
+  /* 白球外缘两条平行线 */
+  const px = -dy, py = dx;
+  [[edgeL3,1],[edgeR3,-1]].forEach(([ln,sg])=>{
+    ln.geometry.setFromPoints([V3(c.x+px*R*sg, 0.003, c.y+py*R*sg), V3(g.x+px*R*sg, 0.003, g.y+py*R*sg)]);
+    ln.computeLineDistances();
+  });
+  /* 接触点：红球表面正对白球的那一点 */
+  contact3.position.set((o.x+g.x)/2*MM, R*MM, (o.y+g.y)/2*MM);
+  /* 角度弧：以假想球为圆心，从出杆方向转向进袋方向 */
+  const T = aimTarget(), vx = T.x-o.x, vy = T.y-o.y, vl = Math.hypot(vx,vy)||1;
+  const a0 = Math.atan2(dy,dx), a1 = Math.atan2(vy/vl, vx/vl);
+  let da = a1-a0; while (da>Math.PI) da-=2*Math.PI; while (da<-Math.PI) da+=2*Math.PI;
+  const ar = 130, pts = [];
+  for (let i=0;i<=24;i++){ const t = a0+da*i/24; pts.push(V3(g.x+Math.cos(t)*ar, 0.003, g.y+Math.sin(t)*ar)); }
+  arc3.geometry.setFromPoints(pts);
+  /* HUD 标签的世界锚点 */
+  const route = routePoints();
+  hudPts.pot = V3(o.x+(route[1].x-o.x)*0.55, 0.003, o.y+(route[1].y-o.y)*0.55);
+  hudPts.aim = V3(c.x+(g.x-c.x)*0.5, 0.003, c.y+(g.y-c.y)*0.5);
+  const am = a0+da/2;
+  hudPts.ang = V3(g.x+Math.cos(am)*(ar+60), 0.003, g.y+Math.sin(am)*(ar+60));
+}
+function placeHudLabels(){
+  const hud = document.getElementById('hud3');
+  if (hud.style.display==='none' || !hudPts.pot) return;
+  const w = wrap3d.clientWidth, h = wrap3d.clientHeight;
+  [['lblPot',hudPts.pot,8,-26],['lblAim',hudPts.aim,10,-6],['lblAng',hudPts.ang,0,-10]].forEach(([id,p,ox,oy])=>{
+    const e = document.getElementById(id), v = p.clone().project(cam3);
+    if (v.z>1 || camMode==='top' && id!=='lblAng'){ e.style.display='none'; return; }
+    e.style.display = 'block';
+    e.style.transform = `translate(${(v.x*0.5+0.5)*w+ox}px, ${(-v.y*0.5+0.5)*h+oy}px)`;
+  });
+}
+const thickNames = ['0','1/8','1/4','3/8','1/2','5/8','3/4','7/8','满'];
+function thickText(a){
+  const e = Math.max(0, 1-Math.sin(Math.min(a,90)*Math.PI/180))*8;
+  if (e>7.9) return '满球';
+  if (Math.abs(e-Math.round(e))<0.12) return thickNames[Math.round(e)]+' 球';
+  return e<1 ? '极薄 <1/8' : thickNames[Math.floor(e)]+'–'+thickNames[Math.ceil(e)]+' 球';
+}
+
+/* ----- 局部俯视（把出杆方向转到朝上，看两球叠位和横移） ----- */
+const insTop = document.getElementById('insTop');
+el('rect',{x:-95, y:-105, width:190, height:235, fill:'#2f8a3a'}, insTop);
+const itCenter = el('line',{x1:0,y1:-105,x2:0,y2:130,stroke:'#fff','stroke-width':1.5,opacity:0.35}, insTop);
+const itAim = [0,1,2].map(i=> el('line',{y1:-105,y2:130,stroke:'#fff','stroke-width':i===0?2:1.6,'stroke-dasharray':i===0?'':'7 6',opacity:i===0?0.95:0.75}, insTop));
+const itPot = el('line',{stroke:'#10301a','stroke-width':2.4,'stroke-dasharray':'8 6'}, insTop);
+el('circle',{cx:0,cy:0,r:R,fill:'#d84a4a',stroke:'#7a1712','stroke-width':1.5}, insTop);
+const itGhost = el('circle',{r:R,fill:'#fff','fill-opacity':0.25,stroke:'#fff','stroke-width':1.5}, insTop);
+const itContact = el('circle',{r:3.2,fill:'#ff3b30'}, insTop);
+const itShift = el('line',{stroke:'#f2e04a','stroke-width':2}, insTop);
+const itShiftTxt = el('text',{fill:'#f2e04a','font-size':13,'font-weight':700,'text-anchor':'middle'}, insTop);
+function updateInsetTop(g, a){
+  const o = S.obj, c = S.cue;
+  let ux = g.x-c.x, uy = g.y-c.y; const ul = Math.hypot(ux,uy)||1; ux/=ul; uy/=ul;
+  const rx = -uy, ry = ux;                       // 屏幕右方向
+  const map = q=>({x:(q.x-o.x)*rx+(q.y-o.y)*ry, y:-((q.x-o.x)*ux+(q.y-o.y)*uy)});
+  const gh = map(g), T = aimTarget();
+  const vx = T.x-o.x, vy = T.y-o.y, vl = Math.hypot(vx,vy)||1;
+  const pv = {x:(vx*rx+vy*ry)/vl, y:-((vx*ux+vy*uy)/vl)};
+  [0,R,-R].forEach((off,i)=>{ itAim[i].setAttribute('x1',gh.x+off); itAim[i].setAttribute('x2',gh.x+off); });
+  itPot.setAttribute('x1',-pv.x*40); itPot.setAttribute('y1',-pv.y*40);
+  itPot.setAttribute('x2',pv.x*130); itPot.setAttribute('y2',pv.y*130);
+  itGhost.setAttribute('cx',gh.x); itGhost.setAttribute('cy',gh.y);
+  itContact.setAttribute('cx',gh.x/2); itContact.setAttribute('cy',gh.y/2);
+  const yy = -R-14;
+  itShift.setAttribute('x1',0); itShift.setAttribute('x2',gh.x); itShift.setAttribute('y1',yy); itShift.setAttribute('y2',yy);
+  itShiftTxt.setAttribute('x',gh.x/2); itShiftTxt.setAttribute('y',yy-5);
+  itShiftTxt.textContent = (2*R*Math.sin(Math.min(a,90)*Math.PI/180)).toFixed(0)+'mm';
+}
+
+/* ----- 袋口瞄准点（沿进袋方向看袋口：袋口朝上，画出喉道、瞄准点和球经过袋口的位置） ----- */
+const insPocket = document.getElementById('insPocket');
+const ipWorld = el('g',{}, insPocket);
+const ipStatic = el('g',{}, ipWorld), ipDyn = el('g',{}, ipWorld);
+let ipBuiltFor = -1;
+function buildPocketInset(){
+  ipBuiltFor = S.pk;
+  while (ipStatic.firstChild) ipStatic.removeChild(ipStatic.firstChild);
+  const g = POCKET_GEO[S.pk], P = ipStatic;
+  el('rect',{x:-L, y:-W, width:2*L, height:2*W, fill:'#4a3421'}, P);
+  el('rect',{x:-L/2, y:-W/2, width:L, height:W, fill:'#2f8a3a'}, P);
+  const t = throatShape(g);
+  el('polygon',{points:t.q.map(v=>v.x+','+v.y).join(' '), fill:'#050403'}, P);
+  el('circle',{cx:t.disc.cx, cy:t.disc.cy, r:t.disc.r, fill:'#050403'}, P);
+  CUSHIONS.forEach(seg=>{
+    if (seg.side==='y') el('rect',{x:Math.min(seg.x1,seg.x2), y:seg.sign>0?seg.y:seg.y-CUSHION, width:Math.abs(seg.x2-seg.x1), height:CUSHION, fill:'#1f6b34'}, P);
+    else el('rect',{x:seg.sign>0?seg.x:seg.x-CUSHION, y:Math.min(seg.y1,seg.y2), width:CUSHION, height:Math.abs(seg.y2-seg.y1), fill:'#1f6b34'}, P);
+  });
+  g.noses.forEach(n=> el('line',{x1:n.c.x,y1:n.c.y,x2:n.end.x,y2:n.end.y,stroke:'#1f6b34','stroke-width':2*NOSE_R,'stroke-linecap':'round'}, P));
+  /* 世界 → 小图：袋口朝上，原点 = 袋口中点 */
+  const ax = g.axis, rx = -ax.y, ry = ax.x, m = g.mouthMid;
+  ipWorld.setAttribute('transform', `matrix(${rx} ${-ax.x} ${ry} ${-ax.y} ${-(m.x*rx+m.y*ry)} ${m.x*ax.x+m.y*ax.y})`);
+}
+const ipPath = el('line',{stroke:'#fff','stroke-width':2.4,'stroke-dasharray':'8 6',opacity:0.9}, ipDyn);
+const ipBall = el('circle',{r:R,fill:'#d84a4a','fill-opacity':0.55,stroke:'#fff','stroke-width':1.5}, ipDyn);
+const ipDot = el('circle',{r:4.5,fill:'#ff3b30',stroke:'#fff','stroke-width':1}, ipDyn);
+function updateInsetPocket(){
+  if (ipBuiltFor!==S.pk) buildPocketInset();
+  const route = routePoints(), n = route.length;
+  const pa = pocketAim(), g = POCKET_GEO[S.pk], ax = g.axis;
+  let dx = route[n-1].x-route[n-2].x, dy = route[n-1].y-route[n-2].y; const dl = Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+  ipPath.setAttribute('x1',pa.x-dx*220); ipPath.setAttribute('y1',pa.y-dy*220);
+  ipPath.setAttribute('x2',pa.x+dx*60);  ipPath.setAttribute('y2',pa.y+dy*60);
+  ipDot.setAttribute('cx',pa.x); ipDot.setAttribute('cy',pa.y);
+  /* 球心穿过鼻圆心连线时的位置（用来看球与两鼻的空隙） */
+  const dn = dx*ax.x+dy*ax.y;
+  const s = Math.abs(dn)>1e-6 ? ((g.mouthMid.x-pa.x)*ax.x+(g.mouthMid.y-pa.y)*ax.y)/dn : 0;
+  ipBall.setAttribute('cx',pa.x+dx*s); ipBall.setAttribute('cy',pa.y+dy*s);
+  document.getElementById('insPTitle').textContent = '袋口瞄准点 · '+(Math.abs(S.aimOff)<0.5?'正中':(S.aimOff>0?'偏 +':'偏 −')+Math.abs(Math.round(S.aimOff))+'mm');
+}
+
 /* ================= 统一刷新 ================= */
 function hint(t){ document.getElementById('hintText').textContent=t; }
 
@@ -1149,13 +1343,14 @@ function update(){
     ghost3.position.set(g.x*MM, R*MM, g.y*MM);
     const dp = POCKET_GEO[S.pk].drop;
     ball3.target.position.set(dp.x*MM, 0.004, dp.y*MM);
-    lnOP3.geometry.setFromPoints(routePoints().map(q=>new THREE.Vector3(q.x*MM, R*MM, q.y*MM)));
+    lnOP3.geometry.setFromPoints(routePoints().map(q=>new THREE.Vector3(q.x*MM, 0.003, q.y*MM)));
     lnOP3.computeLineDistances();
     lnOP3.material.color.set(potColor);
     lnCG3.geometry.setFromPoints([
-      new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM),
-      new THREE.Vector3(g.x*MM, R*MM, g.y*MM)]);
+      new THREE.Vector3(S.cue.x*MM, 0.003, S.cue.y*MM),
+      new THREE.Vector3(g.x*MM, 0.003, g.y*MM)]);
     lnCG3.computeLineDistances();
+    update3dTraining(g);
     ghost3.visible = lnOP3.visible = lnCG3.visible = S.showAnswer;
     setFan3(fanOuter3, S.showAnswer ? triO : []);
     setFan3(fanInner3, S.showAnswer ? triI : []);
@@ -1179,6 +1374,18 @@ function update(){
 
   /* 叠球图 */
   updateOverlap(a, sideSign);
+
+  /* 击球训练 HUD（3D 视图 + 显示答案时） */
+  const hud = document.getElementById('hud3');
+  hud.style.display = (S.view==='3d' && S.showAnswer) ? 'block' : 'none';
+  if (S.view==='3d' && S.showAnswer){
+    document.getElementById('hAng').textContent = a.toFixed(1)+'°';
+    document.getElementById('hShift').textContent = (2*R*Math.sin(Math.min(a,90)*Math.PI/180)).toFixed(1)+' mm';
+    document.getElementById('hThick').textContent = thickText(a);
+    document.getElementById('lblAng').textContent = a.toFixed(1)+'°';
+    updateInsetTop(g, a);
+    updateInsetPocket();
+  }
 
   /* 数据 */
   document.getElementById('angVal').textContent = a.toFixed(1)+'°';
@@ -1253,7 +1460,7 @@ document.getElementById('btnAnswer').addEventListener('click', function(){
   S.showAnswer = !S.showAnswer;
   this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
   update();
-  if (camMode==='player' && ready3) goPlayer();
+  followCam();
 });
 function syncAimSlider(){
   const r = POCKETS[S.pk].r, sl = document.getElementById('aimOff');
@@ -1270,7 +1477,7 @@ function setBank(v){
   S.bank = v || null;
   document.getElementById('selBank').value = S.bank || '';
   update();
-  if (camMode==='player' && ready3) goPlayer();
+  followCam();
 }
 document.getElementById('selBank').addEventListener('change', e=> setBank(e.target.value));
 document.getElementById('btnFan').addEventListener('click', function(){
@@ -1279,7 +1486,8 @@ document.getElementById('btnFan').addEventListener('click', function(){
   update();
 });
 document.getElementById('btnTop').addEventListener('click', goTop);
-document.getElementById('btnPlayer').addEventListener('click', goPlayer);
+document.getElementById('btnPlayer').addEventListener('click', ()=>goPlayer());
+document.getElementById('btnThird').addEventListener('click', ()=>goThird());
 
 update();
 </script>
