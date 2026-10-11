@@ -326,8 +326,14 @@
 'use strict';
 /* PWA：注册 service worker 以支持离线访问和添加到主屏幕 */
 if ('serviceWorker' in navigator){
+  /* 新版 service worker 接管后自动重载一次，不用再手动刷新两次（首次安装不重载） */
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if (hadController && !reloaded){ reloaded = true; location.reload(); }
+  });
   window.addEventListener('load', ()=>{
-    try{ navigator.serviceWorker.register('sw.js'); }catch(e){}
+    try{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){}
   });
 }
 /* ================= 真实规格（毫米） ================= */
@@ -2023,7 +2029,7 @@ window.addEventListener('keydown', e=>{
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v13');
+    add('版本缓存', 'v14');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);

@@ -1,4 +1,4 @@
-const CACHE = 'snooker-trainer-v13';
+const CACHE = 'snooker-trainer-v14';
 const ASSETS = [
   './',
   './index.html',
@@ -14,7 +14,7 @@ self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c =>
       Promise.all(ASSETS.map(url =>
-        fetch(url).then(res => res.ok && c.put(url, res)).catch(() => {})
+        fetch(url, {cache: 'reload'}).then(res => res.ok && c.put(url, res)).catch(() => {})
       ))
     )
   );
