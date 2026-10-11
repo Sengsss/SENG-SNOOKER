@@ -69,6 +69,16 @@
   .stbl th{color:var(--muted); font-weight:500;}
   .sec-t{color:var(--brass); font-size:14px; margin-top:6px;}
   .tip{font-size:13px; line-height:1.7; color:var(--text); background:var(--panel2); border-radius:8px; padding:8px 10px; margin-bottom:8px;}
+  .eng-sec{width:100%; max-width:1080px; margin-top:10px; display:grid; grid-template-columns:210px 1fr; gap:16px;}
+  .eng-ball svg{width:170px; height:170px; display:block; margin:4px auto; touch-action:none; cursor:crosshair;}
+  .eng-presets{display:flex; flex-wrap:wrap; gap:4px; justify-content:center;}
+  .eng-presets button{background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:6px; padding:6px 8px; font-size:12px; cursor:pointer; font-family:inherit;}
+  .eng-in{display:flex; gap:10px; flex-wrap:wrap; margin:6px 0;}
+  .eng-in label{display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); flex:1; min-width:140px;}
+  .eng-in input{background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px; padding:8px; font-size:15px; font-family:inherit;}
+  .eng-out{font-size:14px; line-height:1.8; background:var(--panel2); border-radius:8px; padding:8px 10px; margin:6px 0; min-height:60px;}
+  .eng-note{font-size:12px; color:var(--muted); line-height:1.7;}
+  @media (max-width:640px){ .eng-sec{grid-template-columns:1fr;} }
   .foot-tools{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
   .cal-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:8px 0;}
   .cal-grid label{display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted);}
@@ -276,6 +286,27 @@
   </div>
 </div>
 
+<div class="card eng-sec" id="engSec">
+  <div class="eng-ball">
+    <div class="lbl">击球点（从后面看白球）</div>
+    <svg id="engSvg" viewBox="-30 -30 60 60"></svg>
+    <div class="eng-presets" id="engPresets"></div>
+  </div>
+  <div class="eng-main">
+    <div class="lbl">加塞几何分析 · 只含能由力学推出的部分</div>
+    <div class="eng-in">
+      <label>路线偏移 δ (mm)<input type="number" id="engDl" step="0.5" inputmode="decimal" placeholder="待实测"></label>
+      <label>球间摩擦 μ<input type="number" id="engMu" step="0.005" min="0" max="0.2" inputmode="decimal" placeholder="待实测"></label>
+    </div>
+    <div class="eng-out" id="engOut">--</div>
+    <div class="eng-note">
+      δ = 白球最后到红球时，比理想出杆线横向偏了多少（向出杆方向的右边为正）；μ = 球与球之间的摩擦系数。
+      两者都靠你在球房实测，<b>没填就不计入</b>。旋转比 ωR/v = 2.5·b/R 是刚体力学算出的，与球杆无关。
+      上下偏移只影响走位，这里不计。
+    </div>
+  </div>
+</div>
+
 <footer>
   <b>训练方法</b>：点「隐藏答案」→ 目测假想球位置和出杆线 → 点「显示答案」对照。
   白色虚线圆 = 假想球（瞄准点），金色虚线 = 红球进袋线，蓝色虚线 = 出杆线。<br>
@@ -480,6 +511,7 @@ const S = {
   pk: 5,
   showAnswer: true,
   showFan: true,
+  eng: {b:0, h:0, dl:0, mu:0},   // 加塞：击球点偏移 b(右+)/h(上+) mm；路线偏移 dl mm(右+，待实测)；球间摩擦 mu(待实测，0=不算)
   aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
   bank: null,      // null | 'top' | 'bottom' | 'left' | 'right'：借一库
   mode: 'free',
@@ -488,6 +520,11 @@ const S = {
 
 /* v2 测验状态：type = ghost（点选假想球）| ov（叠球 x/8）；phase = ask | result */
 const Q = {on:false, type:'ghost', phase:'ask', t0:0, guess:null, pick:null, res:null};
+/* 加塞参数里的 dl / mu 要靠实测，存起来下次不用重填 */
+try{
+  const v = JSON.parse(localStorage.getItem('snooker-eng-v1')||'null');
+  if (v){ S.eng.dl = Math.max(-30, Math.min(30, +v.dl||0)); S.eng.mu = Math.max(0, Math.min(0.2, +v.mu||0)); }
+}catch(e){}
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
 
@@ -772,6 +809,8 @@ const lnCG = el('line',{stroke:'#7ab8f5','stroke-width':5,'stroke-dasharray':'26
 const aimHandle = el('g',{}, gAns);
 el('circle',{r:24, fill:'#c9a45c', opacity:0.85, stroke:'#1c1915','stroke-width':4}, aimHandle);
 el('circle',{r:8, fill:'#1c1915'}, aimHandle);
+const engCb = el('circle',{r:R, fill:'none', stroke:'#7ad0f5','stroke-width':4,'stroke-dasharray':'3 8','stroke-linecap':'round'}, gAns);
+const engPath = el('polyline',{fill:'none', stroke:'#7ad0f5','stroke-width':5,'stroke-dasharray':'3 9','stroke-linecap':'round'}, gAns);
 const cGhost = el('circle',{r:R, fill:'none', stroke:'#fff','stroke-width':4,'stroke-dasharray':'12 10'}, gAns);
 /* 撞鼻反弹可视化：只在会撞鼻时出现 */
 const gBounce = el('g',{opacity:0}, gAns);
@@ -1697,6 +1736,8 @@ function update(){
       : ((fan.inner.hi-fan.inner.lo)*180/Math.PI).toFixed(1)+'° · 袋口处 ≈'+Math.round(fan.widthMm)+'mm'
     : '无直进角度';
 
+  updateEnglish();
+
   /* 隐藏答案：凡是能反推假想球 / 切角 / 能否进袋的读数一律遮住，只留红球行程 */
   const ovCard = document.querySelector('.overlap-card');
   const ovQuiz = Q.on && Q.type==='ov';
@@ -1997,6 +2038,103 @@ window.addEventListener('blur', ()=>{                               // 切走窗
   btn.addEventListener('contextmenu', e=>e.preventDefault());
 });
 
+/* ================= 加塞几何分析 ================= */
+/* 只放能由力学 / 几何严格推出的东西：
+   1) 杆头沿杆方向发力、偏离球心 b → 白球旋转比 ωR/v = 2.5·b/R（实心球 I = 2/5·mR²）
+   2) 白球路线横向偏了 δ → 触点改变 → 红球出球方向（纯几何，放大倍率 ≈ 1/(2R·cosθ)）
+   3) 球间摩擦带偏：红球被沿接触面拖动，tanΔ = min(μ, |滑动速度| / (7·法向速度))
+      （7 = 两球平动 + 两球转动惯量的合计；恢复系数取 1）
+   squirt（出杆偏移）和 swerve（拐弯）的大小、μ 都没有斯诺克实测，所以做成需要你填的参数，默认 0。 */
+const TIP_D = 9.5;                 // 杆头直径 mm（用户的杆）
+const ENG_MAX = R*0.5;             // 击球点偏离球心上限（常见的不拐杆极限，约半个球半径）
+function englishShot(){
+  const e = S.eng, o = S.obj, c = S.cue, g = ghostPos(), T = aimTarget();
+  const M = p=>({x:p.x, y:-p.y});               // 转成 y 向上的数学坐标（和屏幕上看到的方向一致）
+  const cm = M(c), om = M(o), gm = M(g), Tm = M(T);
+  const ul = Math.hypot(gm.x-cm.x, gm.y-cm.y)||1, u = {x:(gm.x-cm.x)/ul, y:(gm.y-cm.y)/ul};
+  const rr = {x:u.y, y:-u.x};                   // 出杆方向的右手边
+  const rho = 2.5*e.b/R;                        // ωR/v，右塞 > 0（俯视逆时针）
+  const res = {rho, active: e.dl!==0 || e.mu!==0};
+  const f = {x:cm.x+rr.x*e.dl-om.x, y:cm.y+rr.y*e.dl-om.y};
+  const B = f.x*u.x+f.y*u.y, C = f.x*f.x+f.y*f.y-4*R*R, disc = B*B-C;
+  const t = -B-Math.sqrt(Math.max(disc,0));
+  if (disc<0 || t<=0){ res.miss = true; return res; }
+  const ct = {x:cm.x+rr.x*e.dl+u.x*t, y:cm.y+rr.y*e.dl+u.y*t};    // 触球时白球球心
+  const n = {x:(om.x-ct.x)/(2*R), y:(om.y-ct.y)/(2*R)};          // 球心连线（红球理想出球方向）
+  const tt = {x:-n.y, y:n.x};
+  const vn = Math.max(u.x*n.x+u.y*n.y, 1e-6);
+  const slide = (u.x*tt.x+u.y*tt.y) + rho;                       // 接触点相对滑动速度（v=1）
+  const th = Math.atan(Math.min(e.mu, Math.abs(slide)/(7*vn))*Math.sign(slide));
+  const aLine = Math.atan2(n.y,n.x), aFinal = aLine+th, aIdeal = Math.atan2(Tm.y-om.y, Tm.x-om.x);
+  const norm = a=>{ while (a>Math.PI) a-=2*Math.PI; while (a<-Math.PI) a+=2*Math.PI; return a; };
+  const aSvg = -aFinal, d = {x:Math.cos(aSvg), y:Math.sin(aSvg)};
+  const sim = simulateShot(o, aSvg, POCKET_GEO[S.pk]);
+  const cr = d.x*(T.y-o.y)-d.y*(T.x-o.x);
+  Object.assign(res, {
+    ct:{x:ct.x, y:-ct.y}, pts:sim.pts, pot:sim.status!=='out',
+    total:norm(aFinal-aIdeal)*180/Math.PI, line:norm(aLine-aIdeal)*180/Math.PI, thr:th*180/Math.PI,
+    dev:Math.abs(cr), devLeft:cr>0
+  });
+  return res;
+}
+function lr(deg, unit){ return (deg>=0?'偏左 ':'偏右 ')+Math.abs(deg).toFixed(1)+unit; }   // y 向上坐标里 + = 逆时针 = 左
+function updateEnglish(){
+  const e = S.eng, out = document.getElementById('engOut');
+  /* 击球点小图 */
+  engDot.setAttribute('cx', e.b); engDot.setAttribute('cy', -e.h);
+  engTip.setAttribute('cx', e.b); engTip.setAttribute('cy', -e.h);
+  const r = englishShot();
+  const tips = Math.abs(e.b)/TIP_D;
+  let h = `击球点：${Math.abs(e.b)<0.05?'中杆':(e.b>0?'右 ':'左 ')+Math.abs(e.b).toFixed(1)+' mm（'+tips.toFixed(2)+' 个杆头）'}`;
+  h += `<br>旋转比 ωR/v = ${r.rho.toFixed(2)}${e.b>0?'（右塞，俯视逆时针）':e.b<0?'（左塞，俯视顺时针）':''}`;
+  if (!S.showAnswer){ h += '<br>红球方向 / 袋口偏差：？'; out.innerHTML = h; engCb.setAttribute('opacity',0); engPath.setAttribute('opacity',0); return; }
+  if (r.miss){ h += '<br><b style="color:var(--hard)">白球擦不到红球</b>（路线偏移太大）'; }
+  else if (!r.active){ h += '<br>未填 δ 和 μ：红球方向 = 理想方向（加塞对红球的影响需要你的实测值）。'; }
+  else {
+    h += `<br>红球出球方向：<b>${lr(r.total,'°')}</b>（路线 ${lr(r.line,'°')} + 摩擦带偏 ${lr(r.thr,'°')}）`;
+    h += `<br>袋口：${r.devLeft?'偏左':'偏右'} ${r.dev.toFixed(0)} mm · <b style="color:var(${r.pot?'--good':'--hard'})">${r.pot?'进':'不进'}</b>`;
+  }
+  out.innerHTML = h;
+  const show = r.active && !r.miss;
+  engCb.setAttribute('opacity', show?1:0); engPath.setAttribute('opacity', show?1:0);
+  if (show){
+    engCb.setAttribute('cx', r.ct.x); engCb.setAttribute('cy', r.ct.y);
+    engPath.setAttribute('points', r.pts.map(v=>v.x+','+v.y).join(' '));
+  }
+}
+/* 击球点小图：圆 = 白球正面，拖动圆点设置击球点 */
+const engSvg = document.getElementById('engSvg');
+const svgE = (tag, a, p)=>{ const x = document.createElementNS(NS, tag); for (const k in a) x.setAttribute(k,a[k]); (p||engSvg).appendChild(x); return x; };
+svgE('circle',{r:R, fill:'#f3eee0', stroke:'#b8b09a','stroke-width':0.6});
+svgE('circle',{r:ENG_MAX, fill:'none', stroke:'#c9a45c','stroke-width':0.35,'stroke-dasharray':'1.2 1.2'});
+svgE('line',{x1:-R,y1:0,x2:R,y2:0,stroke:'#8a8470','stroke-width':0.25});
+svgE('line',{x1:0,y1:-R,x2:0,y2:R,stroke:'#8a8470','stroke-width':0.25});
+const engTip = svgE('circle',{r:TIP_D/2, fill:'#3a6ea5','fill-opacity':0.35, stroke:'#3a6ea5','stroke-width':0.4});
+const engDot = svgE('circle',{r:0.9, fill:'#e05c5c'});
+function engPick(ev){
+  const p = engSvg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY;
+  const q = p.matrixTransform(engSvg.getScreenCTM().inverse());
+  let b = q.x, h = -q.y; const l = Math.hypot(b,h);
+  if (l>ENG_MAX){ b *= ENG_MAX/l; h *= ENG_MAX/l; }
+  if (Math.abs(b)<0.4) b = 0;                       // 贴近中线就吸附到中杆
+  S.eng.b = b; S.eng.h = h; update();
+}
+let engDrag = false;
+engSvg.addEventListener('pointerdown', ev=>{ engDrag = true; try{ engSvg.setPointerCapture(ev.pointerId); }catch(x){} engPick(ev); ev.preventDefault(); });
+engSvg.addEventListener('pointermove', ev=>{ if (engDrag){ engPick(ev); ev.preventDefault(); } });
+['pointerup','pointercancel'].forEach(t=> engSvg.addEventListener(t, ()=>{ engDrag = false; }));
+/* 预设：杆头 9.5mm 的整数倍 */
+[['中杆',0],['左½杆头',-TIP_D/2],['左1杆头',-TIP_D],['右½杆头',TIP_D/2],['右1杆头',TIP_D]].forEach(([name,b])=>{
+  const bt = document.createElement('button'); bt.textContent = name;
+  bt.addEventListener('click', ()=>{ S.eng.b = b; S.eng.h = 0; update(); });
+  document.getElementById('engPresets').appendChild(bt);
+});
+function saveEng(){ try{ localStorage.setItem('snooker-eng-v1', JSON.stringify({dl:S.eng.dl, mu:S.eng.mu})); }catch(e){} }
+const engDl = document.getElementById('engDl'), engMu = document.getElementById('engMu');
+engDl.value = S.eng.dl || ''; engMu.value = S.eng.mu || '';
+engDl.addEventListener('input', ()=>{ S.eng.dl = Math.max(-30, Math.min(30, +engDl.value||0)); saveEng(); update(); });
+engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engMu.value||0)); saveEng(); update(); });
+
 /* ================= 校准袋口 ================= */
 (function(){
   const $ = id=>document.getElementById(id);
@@ -2064,7 +2202,7 @@ window.addEventListener('blur', ()=>{                               // 切走窗
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v15');
+    add('版本缓存', 'v16');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2130,6 +2268,7 @@ document.getElementById('segMode').addEventListener('click', e=>{
   document.getElementById('btnNext').textContent = qz ? '跳过 ⏭' : '换一题 ⟳';
   document.getElementById('btnAnswer').style.display = qz ? 'none' : '';
   document.getElementById('quizBar').style.display = qz ? '' : 'none';
+  document.getElementById('engSec').style.display = qz ? 'none' : '';
   ['.aim-ctl','#selBank','#btnFan'].forEach(q=> document.querySelector(q).style.display = qz ? 'none' : '');   // 测验里不提供辅助
   syncNudge();
   if (qz){ startQuiz(); return; }
