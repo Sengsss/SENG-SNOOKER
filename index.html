@@ -763,30 +763,46 @@ function init3d(){
   if (ready3) return;
   ready3 = true;
   scene3 = new THREE.Scene();
-  scene3.background = new THREE.Color(0x1c1915);
+  scene3.background = new THREE.Color(0x0e1014);
+  scene3.fog = new THREE.Fog(0x0e1014, 6, 14);
   cam3 = new THREE.PerspectiveCamera(50, wrap3d.clientWidth/wrap3d.clientHeight, 0.01, 50);
   renderer3 = new THREE.WebGLRenderer({antialias:true});
   renderer3.setPixelRatio(Math.min(devicePixelRatio,2));
   renderer3.setSize(wrap3d.clientWidth, wrap3d.clientHeight);
   renderer3.domElement.style.touchAction='none';
+  renderer3.shadowMap.enabled = true;
+  renderer3.shadowMap.type = THREE.PCFSoftShadowMap;
   wrap3d.appendChild(renderer3.domElement);
 
-  scene3.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const key = new THREE.DirectionalLight(0xfff4dd, 0.85);
-  key.position.set(0.5, 3, 1);
+  /* 球房灯光：半球环境光 + 带阴影的主灯 + 两盏暖色吊灯（只打光，不建模，免得挡住上帝视角） */
+  scene3.add(new THREE.HemisphereLight(0xdfe8ff, 0x1b3a22, 0.5));
+  const key = new THREE.DirectionalLight(0xfff1d6, 0.55);
+  key.position.set(0.6, 3, 0.8);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, {left:-2.4, right:2.4, top:1.5, bottom:-1.5, near:0.5, far:8});
+  key.shadow.bias = -0.0008;
+  key.shadow.normalBias = 0.03;
   scene3.add(key);
+  [-0.9, 0.9].forEach(x=>{
+    const pl = new THREE.PointLight(0xffe2b0, 0.35, 6);
+    pl.position.set(x, 1.4, 0); scene3.add(pl);
+  });
 
   const Lm=L*MM, Wm=W*MM, Rm=R*MM;
   /* 台呢 */
-  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(Lm, Wm), new THREE.MeshLambertMaterial({color:0x35794B}));
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(Lm, Wm), new THREE.MeshStandardMaterial({color:0x24903c, roughness:0.97, metalness:0}));
   cloth.rotation.x=-Math.PI/2;
+  cloth.receiveShadow = true;
   scene3.add(cloth);
   /* 库边 + 木框 */
-  const railM = new THREE.MeshLambertMaterial({color:0x4a3421});
-  const cushM = new THREE.MeshLambertMaterial({color:0x2a5f3c});
+  const railM = new THREE.MeshStandardMaterial({color:0x2a2c31, roughness:0.5, metalness:0.05});
+  const woodM = new THREE.MeshStandardMaterial({color:0xe2bf86, roughness:0.45, metalness:0});
+  const cabM  = new THREE.MeshStandardMaterial({color:0x1b130d, roughness:0.7});
+  const cushM = new THREE.MeshStandardMaterial({color:0x23843a, roughness:0.92, metalness:0});
   function bar(mat,w,h,d,x,y,z){
     const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
-    m.position.set(x,y,z); scene3.add(m);
+    m.position.set(x,y,z); m.receiveShadow = true; m.castShadow = true; scene3.add(m);
   }
   const cw=CUSHION*MM;
   /* 库边：6 段独立几何；鼻 + 喉道斜面见下方 POCKET_GEO 循环 */
@@ -803,6 +819,15 @@ function init3d(){
   bar(railM, Lm+2*cw+0.12, 0.05, 0.06, 0, 0.025, -Wm/2-cw-0.03);
   bar(railM, 0.06, 0.05, Wm+2*cw,  Lm/2+cw+0.03, 0.025, 0);
   bar(railM, 0.06, 0.05, Wm+2*cw, -Lm/2-cw-0.03, 0.025, 0);
+  /* 外圈浅色木框 + 台身 + 地面 */
+  const capT = 0.1, capLong = Lm+2*cw+0.12+2*capT, capShort = Wm+2*cw+0.12+2*capT;
+  bar(woodM, capLong, 0.05, capT, 0, 0.025,  Wm/2+cw+0.06+capT/2);
+  bar(woodM, capLong, 0.05, capT, 0, 0.025, -Wm/2-cw-0.06-capT/2);
+  bar(woodM, capT, 0.05, capShort,  Lm/2+cw+0.06+capT/2, 0.025, 0);
+  bar(woodM, capT, 0.05, capShort, -Lm/2-cw-0.06-capT/2, 0.025, 0);
+  bar(cabM, capLong-0.1, 0.78, capShort-0.1, 0, -0.41, 0);   // 顶面略低于台呢，避免共面闪烁
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), new THREE.MeshStandardMaterial({color:0x16181c, roughness:0.9}));
+  floor.rotation.x=-Math.PI/2; floor.position.y=-0.8; floor.receiveShadow = true; scene3.add(floor);
   /* baulk + D + 置球点 */
   const lineM = new THREE.MeshBasicMaterial({color:0xd9d2c0, transparent:true, opacity:0.7});
   const bl = new THREE.Mesh(new THREE.PlaneGeometry(0.004, Wm), lineM);
@@ -855,8 +880,8 @@ function init3d(){
   scene3.add(ball3.target);
   /* 球 */
   function mkBall(color){
-    const m=new THREE.Mesh(new THREE.SphereGeometry(Rm,24,16), new THREE.MeshLambertMaterial({color:color}));
-    m.position.y=Rm; scene3.add(m); return m;
+    const m=new THREE.Mesh(new THREE.SphereGeometry(Rm,32,24), new THREE.MeshStandardMaterial({color:color, roughness:0.14, metalness:0.0}));
+    m.position.y=Rm; m.castShadow = true; m.receiveShadow = true; scene3.add(m); return m;
   }
   ball3.cue = mkBall(0xf3eee0);
   ball3.obj = mkBall(0xc8342b);
@@ -889,8 +914,8 @@ function init3d(){
   /* 球杆：局部坐标里杆头在原点，杆尾沿 +Y */
   cue3 = new THREE.Group();
   function cyl(rt, rb, h, y, color){
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 14), new THREE.MeshLambertMaterial({color}));
-    m.position.y = y; cue3.add(m);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 14), new THREE.MeshStandardMaterial({color, roughness:0.4}));
+    m.position.y = y; m.castShadow = true; cue3.add(m);
   }
   cyl(0.0052, 0.0052, 0.012, 0.006, 0x3a6ea5);        // 皮头
   cyl(0.0095, 0.0052, 0.70, 0.012+0.35, 0xe7c98f);     // 前节（浅木）
@@ -975,8 +1000,9 @@ function goPlayer(quiet){
   camMode='player';
   const c=new THREE.Vector3(S.cue.x*MM, R*MM, S.cue.y*MM), gv=camRefPoint();
   const back=c.clone().sub(gv).setY(0).normalize();
-  tPos=c.clone().add(back.multiplyScalar(0.5)); tPos.y=0.28;
-  tLook=gv.clone();
+  tPos=c.clone().add(back.clone().multiplyScalar(0.45)); tPos.y=0.24;
+  /* 视线落在白球前方 0.7m 处，让白球、球杆头和瞄准线都进入画面 */
+  tLook=c.clone().add(back.clone().multiplyScalar(-0.7)); tLook.y=0.02;
   if (!quiet) hint('第一人称：模拟趴下瞄准的视线高度');
   setHudMode();
 }
