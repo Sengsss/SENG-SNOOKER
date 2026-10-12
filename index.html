@@ -87,6 +87,10 @@
   .touchpad{border:2px dashed var(--brass-dim); border-radius:10px; padding:18px 10px; text-align:center; font-size:13px; color:var(--muted); margin:8px 0; touch-action:none; user-select:none; -webkit-user-select:none;}
   .touchpad.on{border-color:var(--good); color:var(--text);}
   .diagout{background:#12100d; border:1px solid #3a342a; border-radius:8px; padding:10px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; max-height:260px; overflow:auto; color:var(--text);}
+  .route-ctl{display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .route-nav{display:inline-flex; align-items:center; gap:6px; font-size:13px;}
+  .route-nav .btn{padding:6px 12px;}
+  .cue-note{font-size:12px; color:var(--muted); flex-basis:100%;}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
   #wrap3d{
@@ -187,13 +191,26 @@
   </select>
   <button class="btn" id="btnNext" style="display:none;">换一题 ⟳</button>
   <button class="btn" id="btnAnswer">隐藏答案 👁</button>
-  <select id="selBank" title="借库：点击台面库边也可设置">
-    <option value="">直接进袋</option>
-    <option value="top">借上长库</option>
-    <option value="bottom">借下长库</option>
-    <option value="left">借左短库（底库）</option>
-    <option value="right">借右短库（顶库）</option>
+  <span class="route-ctl" id="routeCtl">
+    <select id="selRoute" title="红球线路：直接进袋，或借 1 / 2 / 3 库（点台边也可设置 1 库）">
+      <option value="0">直接进袋</option>
+      <option value="1">借 1 库</option>
+      <option value="2">借 2 库</option>
+      <option value="3">借 3 库</option>
+    </select>
+    <span class="route-nav" id="routeNav" style="display:none;">
+      <button class="btn" id="btnRoutePrev" aria-label="上一条线路">‹</button>
+      <span id="routeLbl">--</span>
+      <button class="btn" id="btnRouteNext" aria-label="下一条线路">›</button>
+    </span>
+  </span>
+  <select id="selCue" title="白球碰球后的理想走位（无旋转 / 定杆），画到第几库">
+    <option value="0">白球走位：不显示</option>
+    <option value="1">白球走位：1 库</option>
+    <option value="2">白球走位：2 库</option>
+    <option value="3">白球走位：3 库</option>
   </select>
+  <span class="cue-note" id="cueNote"></span>
   <span class="aim-ctl">瞄准点
     <input type="range" id="aimOff" min="-43" max="43" step="1" value="0">
     <button class="btn" id="btnAimC">居中</button>
@@ -498,7 +515,8 @@ const S = {
   showFan: true,
   eng: {b:0, h:0, dl:0, mu:0},   // 加塞：击球点偏移 b(右+)/h(上+) mm；路线偏移 dl mm(右+，待实测)；球间摩擦 mu(待实测，0=不算)
   aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
-  bank: null,      // null | 'top' | 'bottom' | 'left' | 'right'：借一库
+  banks: [],       // 红球线路：依次碰的库边，如 ['top','right']（0~3 库；空 = 直接进袋）
+  cueCush: 0,      // 白球碰球后的理想走位：画到第几库（0 = 不显示）
   mode: 'free',
 };
 
@@ -529,9 +547,24 @@ function pocketAim(){
   const p = POCKETS[S.pk], md = POCKET_GEO[S.pk].mouthDir;
   return {x:p.x+md.x*S.aimOff, y:p.y+md.y*S.aimOff};
 }
+/* 多库：袋口依次对最后一库、…、第一库做镜像（展开法），红球直线瞄准展开后的袋口即可 */
+function unfoldTarget(p, seq){
+  let q = p;
+  for (let i=seq.length-1; i>=0; i--) q = mirrorPt(q, BANKS[seq[i]]);
+  return q;
+}
 function aimTarget(){
   const p = pocketAim();
-  return S.bank ? mirrorPt(p, BANKS[S.bank]) : p;
+  return S.banks.length ? unfoldTarget(p, S.banks) : p;
+}
+const reflectDir = (dir, b)=> b.axis==='y' ? {x:dir.x, y:-dir.y} : {x:-dir.x, y:dir.y};
+function firstPlane(pos, dir){            // 射线最先碰到的反弹面
+  let first = null;
+  for (const key in BANKS){
+    const h = bankCross(pos, dir, BANKS[key]);
+    if (h && (!first || h.t<first.t)) first = {key, t:h.t, pos:h.pos};
+  }
+  return first;
 }
 function bankCross(o, dir, b){          // 射线与反弹面的交点
   const c = b.axis, d = dir[c];
@@ -624,31 +657,105 @@ function simulatePot(origin, dir0, geo){
   pts.push({x:pos.x+dir.x*180, y:pos.y+dir.y*180});
   return {status:'out', hits, pts};
 }
-/* 一次出球的完整模拟：直接进袋，或先在选定库边反弹一次再进袋 */
-function simulateShot(o, ang, geo){
-  const dir = {x:Math.cos(ang), y:Math.sin(ang)};
-  if (!S.bank) return simulatePot(o, dir, geo);
-  const b = BANKS[S.bank], bp = bankCross(o, dir, b);
-  if (!bp) return {status:'out', noBank:true, hits:[], pts:[o, {x:o.x+dir.x*300, y:o.y+dir.y*300}]};
-  if (!bankOnCushion(bp.pos, b)) return {status:'out', noBank:true, hits:[], pts:[o, bp.pos]};
-  const rdir = b.axis==='y' ? {x:dir.x, y:-dir.y} : {x:-dir.x, y:dir.y};
-  const res = simulatePot(bp.pos, rdir, geo);
-  res.pts = [o].concat(res.pts);
-  res.bank = bp.pos;
+/* 一次出球的完整模拟：依次碰 seq 里的库边（0~3 库），再进袋。
+   每一库都必须是射线最先碰到的反弹面，且反弹点落在库边段上（不能落在袋口里），否则线路不成立。 */
+function simulateRoute(o, ang, seq, geo){
+  let pos = {x:o.x, y:o.y}, dir = {x:Math.cos(ang), y:Math.sin(ang)};
+  const pts = [{x:o.x, y:o.y}], banks = [];
+  const fail = extra=>({status:'out', noBank:true, hits:[], banks, pts:pts.concat(extra)});
+  for (const key of seq){
+    const b = BANKS[key], bp = bankCross(pos, dir, b);
+    if (!bp) return fail([{x:pos.x+dir.x*300, y:pos.y+dir.y*300}]);
+    const first = firstPlane(pos, dir);
+    if (!first || first.key!==key || !bankOnCushion(bp.pos, b)) return fail([bp.pos]);
+    pts.push(bp.pos); banks.push(bp.pos);
+    dir = reflectDir(dir, b); pos = {x:bp.pos.x, y:bp.pos.y};
+  }
+  const res = simulatePot(pos, dir, geo);
+  res.pts = pts.slice(0,-1).concat(res.pts);      // res.pts[0] 就是最后一个反弹点（或起点）
+  res.banks = banks;
   return res;
 }
+function simulateShot(o, ang, geo){ return simulateRoute(o, ang, S.banks, geo); }
 function potJudge(){
   const T = aimTarget(), o = S.obj;
   return simulateShot(o, Math.atan2(T.y-o.y, T.x-o.x), POCKET_GEO[S.pk]);
 }
-/* 红球走的折线：直接进袋 [红球, 袋口]；借库 [红球, 反弹点, 袋口]（反弹点不在库边上时画到镜像袋口） */
+/* 红球走的折线：[红球, 各库反弹点…, 袋口]（某一库打不到时画到展开后的袋口） */
 function routePoints(){
   const p = pocketAim(), o = S.obj;
-  if (!S.bank) return [o, p];
-  const T = aimTarget(), b = BANKS[S.bank];
-  const dd = dist(o,T)||1, dir = {x:(T.x-o.x)/dd, y:(T.y-o.y)/dd};
-  const bp = bankCross(o, dir, b);
-  return bp ? [o, bp.pos, p] : [o, T];
+  if (!S.banks.length) return [o, p];
+  const T = aimTarget(), dd = dist(o,T)||1;
+  let dir = {x:(T.x-o.x)/dd, y:(T.y-o.y)/dd}, pos = o;
+  const pts = [o];
+  for (const key of S.banks){
+    const b = BANKS[key], bp = bankCross(pos, dir, b);
+    if (!bp) return pts.concat([T]);
+    pts.push(bp.pos); dir = reflectDir(dir, b); pos = bp.pos;
+  }
+  pts.push(p);
+  return pts;
+}
+const pathLen = pts=> pts.reduce((s,q,i)=> i ? s+dist(pts[i-1],q) : 0, 0);
+function ghostFor(T){                    // 红球瞄准（展开后的）T 时的假想球位置
+  const o = S.obj, dd = Math.hypot(o.x-T.x, o.y-T.y)||1;
+  return {x:o.x+(o.x-T.x)/dd*2*R, y:o.y+(o.y-T.y)/dd*2*R};
+}
+function cutAngleAt(T){                   // 若红球瞄准 T，白球出杆线与进球线的夹角
+  const o = S.obj, g = ghostFor(T);
+  const v1 = {x:g.x-S.cue.x, y:g.y-S.cue.y}, v2 = {x:T.x-o.x, y:T.y-o.y};
+  const c = (v1.x*v2.x+v1.y*v2.y)/((Math.hypot(v1.x,v1.y)*Math.hypot(v2.x,v2.y))||1);
+  return Math.acos(clamp(c,-1,1))*180/Math.PI;
+}
+/* 线路枚举：n 库的所有库边顺序（相邻不重复），逐条模拟，能进袋的才算「可行线路」，按红球总行程从短到长排 */
+const SIDE_KEYS = ['top','right','bottom','left'];
+const SIDE_SHORT = {top:'上', bottom:'下', left:'左', right:'右'};
+function routeSeqs(n){
+  let seqs = [[]];
+  for (let i=0;i<n;i++){
+    const nx = [];
+    seqs.forEach(sq=> SIDE_KEYS.forEach(k=>{ if (!sq.length || sq[sq.length-1]!==k) nx.push(sq.concat(k)); }));
+    seqs = nx;
+  }
+  return seqs;
+}
+function validRoutes(n){
+  const o = S.obj, geo = POCKET_GEO[S.pk], p = pocketAim(), out = [];
+  routeSeqs(n).forEach(seq=>{
+    const T = unfoldTarget(p, seq), r = simulateRoute(o, Math.atan2(T.y-o.y, T.x-o.x), seq, geo);
+    if (r.status==='out') return;
+    /* 白球得真的打得到：切角不超过 85°，且假想球位置在台面内（否则白球根本摆不到那个位置） */
+    const cut = cutAngleAt(T), g = ghostFor(T);
+    if (cut>85 || Math.abs(g.x)>L/2-R || Math.abs(g.y)>W/2-R) return;
+    out.push({seq, len:pathLen(r.pts), cut, status:r.status});
+  });
+  return out.sort((a,b)=>a.len-b.len);
+}
+const sameSeq = (a,b)=> a.length===b.length && a.every((k,i)=>k===b[i]);
+const seqLabel = seq=> seq.map(k=>SIDE_SHORT[k]).join('→');
+
+/* 白球碰球后的理想走位：无旋转（定杆）时白球沿两球连心线的切线走（两等质量球弹性碰撞，90° 规则），
+   之后按入射角 = 反射角碰库。不含旋转、摩擦、库边吃速度——只是几何上的理想线路，真实走位会因加塞 / 高低杆而不同。 */
+function cueFollowPath(nMax){
+  const o = S.obj, c = S.cue, g = ghostPos();
+  const nx = (o.x-g.x)/(2*R), ny = (o.y-g.y)/(2*R);               // 红球出球方向（球心连线）
+  let ux = g.x-c.x, uy = g.y-c.y; const ul = Math.hypot(ux,uy)||1; ux/=ul; uy/=ul;
+  const un = ux*nx+uy*ny;
+  let tx = ux-un*nx, ty = uy-un*ny; const tl = Math.hypot(tx,ty);
+  if (tl<0.03) return {stop:true, pts:[g], hits:0, pocketRisk:false};      // 近似正面：定杆，白球停在原地
+  let dir = {x:tx/tl, y:ty/tl}, pos = {x:g.x, y:g.y}, hits = 0, pocketRisk = false;
+  const pts = [pos];
+  while (hits<nMax){
+    const f = firstPlane(pos, dir);
+    if (!f) break;
+    const b = BANKS[f.key];
+    pts.push(f.pos);
+    if (!bankOnCushion(f.pos, b)){ pocketRisk = true; return {stop:false, pts, hits, pocketRisk, tl}; }
+    dir = reflectDir(dir, b); pos = f.pos; hits++;
+  }
+  const f = firstPlane(pos, dir), len = Math.min(f ? f.t : 500, 500);        // 到设定库数后再延伸一小段
+  pts.push({x:pos.x+dir.x*len, y:pos.y+dir.y*len});
+  return {stop:false, pts, hits, pocketRisk, tl};
 }
 
 /* 可进袋扇形：以目标球为圆心，向袋口方向左右各扫 FAN_MAX°，每 0.1° 做一次进袋模拟。
@@ -681,37 +788,24 @@ function potFan(){
           widthMm: inner ? dist0*(Math.tan(inner.hi)-Math.tan(inner.lo)) : 0};
 }
 
-/* 把扇形区间变成三角形列表（2D 用 path，3D 用 BufferGeometry）。
-   直接进袋 = 一个扇；借库 = 入射扇（红球→库边）+ 反射带（库边→袋口） */
+/* 把扇形区间变成三角形列表（3D 用 BufferGeometry）。
+   对区间内每条射线做完整模拟，取每一段（红球→第 1 库→…→袋口）的端点，相邻两条射线之间逐段铺四边形 */
 function fanTris(fan, rng){
   if (!rng) return [];
-  const o = S.obj, geo = POCKET_GEO[S.pk], ax = geo.axis;
+  const o = S.obj, geo = POCKET_GEO[S.pk];
   const steps = Math.max(2, Math.ceil((rng.hi-rng.lo)*180/Math.PI/1.5));
-  const tris = [];
-  if (!S.bank){
-    let prev = null;
-    for (let i=0;i<=steps;i++){
-      const a = fan.base+rng.lo+(rng.hi-rng.lo)*i/steps;
-      const q = {x:o.x+Math.cos(a)*fan.reach, y:o.y+Math.sin(a)*fan.reach};
-      if (prev) tris.push([o, prev, q]);
-      prev = q;
-    }
-    return tris;
-  }
-  const b = BANKS[S.bank], Bs = [], Es = [];
+  const paths = [], tris = [];
   for (let i=0;i<=steps;i++){
-    const a = fan.base+rng.lo+(rng.hi-rng.lo)*i/steps;
-    const dir = {x:Math.cos(a), y:Math.sin(a)}, bp = bankCross(o, dir, b);
-    if (!bp) continue;
-    const rd = b.axis==='y' ? {x:dir.x, y:-dir.y} : {x:-dir.x, y:dir.y};
-    const dn = rd.x*ax.x+rd.y*ax.y;
-    const len = dn>0.05 ? Math.max(0,(geo.dropProj-(bp.pos.x*ax.x+bp.pos.y*ax.y))/dn) : 150;
-    Bs.push(bp.pos); Es.push({x:bp.pos.x+rd.x*len, y:bp.pos.y+rd.y*len});
+    const r = simulateShot(o, fan.base+rng.lo+(rng.hi-rng.lo)*i/steps, geo);
+    paths.push([o].concat(r.banks||[], [r.pts[r.pts.length-1]]));
   }
-  for (let i=0;i+1<Bs.length;i++){
-    tris.push([o, Bs[i], Bs[i+1]]);
-    tris.push([Bs[i], Bs[i+1], Es[i]]);
-    tris.push([Bs[i+1], Es[i+1], Es[i]]);
+  for (let i=0;i+1<paths.length;i++){
+    const A = paths[i], B = paths[i+1];
+    if (A.length!==B.length) continue;
+    for (let j=0;j+1<A.length;j++){
+      tris.push([A[j], A[j+1], B[j+1]]);
+      tris.push([A[j], B[j+1], B[j]]);
+    }
   }
   return tris;
 }
@@ -738,7 +832,7 @@ function cushionAt(p){
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -892,8 +986,10 @@ function init3d(){
   mirror3.rotation.x = -Math.PI/2; mirror3.visible = false; scene3.add(mirror3);
   quizRing3 = new THREE.Mesh(new THREE.RingGeometry(R*MM*0.85, R*MM*1.0, 32), new THREE.MeshBasicMaterial({color:0xc9a45c, side:THREE.DoubleSide}));
   quizRing3.rotation.x = -Math.PI/2; quizRing3.visible = false; scene3.add(quizRing3);
-  bankStrip3 = new THREE.Mesh(new THREE.BoxGeometry(1,0.012,0.012), new THREE.MeshBasicMaterial({color:0xc9a45c}));
-  bankStrip3.visible = false; scene3.add(bankStrip3);
+  bankStrip3 = [0,1,2].map(()=>{
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1,0.012,0.012), new THREE.MeshBasicMaterial({color:0xc9a45c}));
+    m.visible = false; scene3.add(m); return m;
+  });
   ball3.target = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.007, 8, 32), new THREE.MeshBasicMaterial({color:0xc9a45c}));
   ball3.target.rotation.x=-Math.PI/2;
   scene3.add(ball3.target);
@@ -926,6 +1022,7 @@ function init3d(){
   aim3 = new THREE.Mesh(new THREE.CircleGeometry(0.011, 20), new THREE.MeshBasicMaterial({color:0xc9a45c, depthTest:false}));
   aim3.rotation.x = -Math.PI/2; aim3.renderOrder = 5; scene3.add(aim3);
   mirrorLine3 = dash(0xc9a45c);
+  cuePath3 = dash(0xf3eee0);
   qAim3 = dash(0xc9a45c);
   qErr3 = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]), new THREE.LineBasicMaterial({color:0xe05c5c}));
   scene3.add(qErr3);
@@ -933,7 +1030,7 @@ function init3d(){
   engPath3 = dash(0x7ad0f5);
   engCb3 = new THREE.Mesh(new THREE.RingGeometry(Rm*0.9, Rm, 40), new THREE.MeshBasicMaterial({color:0x7ad0f5, side:THREE.DoubleSide, transparent:true, opacity:0.9}));
   engCb3.rotation.x = -Math.PI/2; scene3.add(engCb3);
-  [aim3, mirrorLine3, qAim3, qErr3, qPath3, engPath3, engCb3].forEach(o=>{ o.visible = false; });
+  [aim3, cuePath3, mirrorLine3, qAim3, qErr3, qPath3, engPath3, engCb3].forEach(o=>{ o.visible = false; });
 
   /* 击球训练辅助：瞄准线两侧边线（白球外缘）、接触点、角度弧、球杆 */
   function dashW(){
@@ -1016,7 +1113,7 @@ function init3d(){
       });
       if (pick>=0){ selectPocket(pick); e.preventDefault(); return; }
       const side = cushionAt(tp);
-      if (side){ setBank(S.bank===side ? null : side); e.preventDefault(); }
+      if (side){ setRoute(sameSeq(S.banks,[side]) ? [] : [side]); e.preventDefault(); }
     }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
@@ -1117,7 +1214,7 @@ function followCam(){
 /* ================= 随机出题 ================= */
 const BANDS = {any:[0,80], easy:[0,25], mid:[25,50], hard:[50,80]};
 function randomLayout(){
-  S.bank = null; document.getElementById('selBank').value = ''; S.aimOff = 0;
+  S.banks = []; S.aimOff = 0;
   const band = BANDS[document.getElementById('selDiff').value];
   let ok = false;
   for (let i=0;i<600 && !ok;i++){
@@ -1432,8 +1529,18 @@ function update(){
     const pa = pocketAim();
     aim3.visible = S.showAnswer && S.mode!=='quiz';
     aim3.position.set(pa.x*MM, 0.006, pa.y*MM);
-    mirrorLine3.visible = S.showAnswer && !!S.bank;
-    if (S.bank){ setLine3(mirrorLine3, [S.obj, aimTarget()], 0.003); mirrorLine3.visible = S.showAnswer; }
+    mirrorLine3.visible = false;
+    if (S.banks.length){ setLine3(mirrorLine3, [S.obj, aimTarget()], 0.003); mirrorLine3.visible = S.showAnswer; }
+    /* 白球碰球后的理想走位 */
+    cuePath3.visible = false;
+    const cnote = document.getElementById('cueNote');
+    if (S.cueCush>0 && S.showAnswer){
+      const cf = cueFollowPath(S.cueCush);
+      if (!cf.stop) setLine3(cuePath3, cf.pts, 0.004);
+      cnote.textContent = (cf.stop ? '白球走位（理想·无旋转）：近似正面，定杆后白球停在原地'
+        : `白球走位（理想·无旋转）：沿切线，碰 ${cf.hits} 库${cf.pocketRisk?'，⚠ 第 '+(cf.hits+1)+' 次撞向袋口（可能落袋）':''}`)
+        + '。真实走位会因加塞 / 高低杆而不同。';
+    } else cnote.textContent = '';
     lnOP3.geometry.setFromPoints(routePoints().map(q=>new THREE.Vector3(q.x*MM, 0.003, q.y*MM)));
     lnOP3.computeLineDistances();
     lnOP3.material.color.set(potColor);
@@ -1447,14 +1554,20 @@ function update(){
     setFan3(fanInner3, S.showAnswer ? triI : []);
     quizRing3.visible = !!(Q.on && Q.guess);
     if (Q.guess) quizRing3.position.set(Q.guess.x*MM, 0.004, Q.guess.y*MM);
-    mirror3.visible = bankStrip3.visible = S.showAnswer && !!S.bank;
-    if (S.bank){
-      const bk = BANKS[S.bank], T = aimTarget(), fc = bk.v + (bk.sign<0?-R:R);
+    mirror3.visible = S.showAnswer && S.banks.length>0;
+    if (S.banks.length){
+      const T = aimTarget();
       mirror3.position.set(T.x*MM, 0.003, T.y*MM);
       mirror3.scale.setScalar(POCKETS[S.pk].r/CORNER_R);
-      if (bk.axis==='y'){ bankStrip3.scale.set(L*MM,1,1); bankStrip3.position.set(0,0.047,fc*MM); bankStrip3.rotation.y=0; }
-      else { bankStrip3.scale.set(W*MM,1,1); bankStrip3.position.set(fc*MM,0.047,0); bankStrip3.rotation.y=Math.PI/2; }
     }
+    bankStrip3.forEach((m,i)=>{
+      const key = S.banks[i];
+      m.visible = S.showAnswer && !!key;
+      if (!key) return;
+      const bk = BANKS[key], fc = bk.v + (bk.sign<0?-R:R);
+      if (bk.axis==='y'){ m.scale.set(L*MM,1,1); m.position.set(0,0.047+i*0.002,fc*MM); m.rotation.y=0; }
+      else { m.scale.set(W*MM,1,1); m.position.set(fc*MM,0.047+i*0.002,0); m.rotation.y=Math.PI/2; }
+    });
     const showBounce = S.showAnswer && pj.status!=='clear' && pj.hits.length>0;
     bounceRing3.visible = bounceLine3.visible = showBounce;
     if (showBounce){
@@ -1515,6 +1628,7 @@ function update(){
       : ((fan.inner.hi-fan.inner.lo)*180/Math.PI).toFixed(1)+'° · 袋口处 ≈'+Math.round(fan.widthMm)+'mm'
     : '无直进角度';
 
+  updateRouteUI();
   updateEnglish();
 
   /* 隐藏答案：凡是能反推假想球 / 切角 / 能否进袋的读数一律遮住，只留红球行程 */
@@ -1595,7 +1709,7 @@ function evalGhost(G){
   const f = {x:c.x-o.x, y:c.y-o.y}, B = f.x*u.x+f.y*u.y, C = f.x*f.x+f.y*f.y-4*R*R, disc = B*B-C;
   const gl = Math.hypot(g.x-c.x, g.y-c.y)||1, ug = {x:(g.x-c.x)/gl, y:(g.y-c.y)/gl};
   const r = {type:'ghost', t:Date.now(), ang:cutAngle(), err:dist(G,g), secs:(performance.now()-Q.t0)/1000,
-             pot:false, miss:false, thin:null, dev:null, devLeft:false, pts:[], contact:null, bank:!!S.bank};
+             pot:false, miss:false, thin:null, dev:null, devLeft:false, pts:[], contact:null, bank:S.banks.length>0};
   const tHit = -B-Math.sqrt(Math.max(disc,0));
   if (disc<0 || tHit<=0){ r.miss = true; return r; }
   const ct = {x:c.x+u.x*tHit, y:c.y+u.y*tHit};
@@ -1977,7 +2091,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v18');
+    add('版本缓存', 'v19');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2032,7 +2146,7 @@ document.getElementById('segMode').addEventListener('click', e=>{
   document.getElementById('btnAnswer').style.display = qz ? 'none' : '';
   document.getElementById('quizBar').style.display = qz ? '' : 'none';
   document.getElementById('engSec').style.display = qz ? 'none' : '';
-  ['.aim-ctl','#selBank','#btnFan'].forEach(q=> document.querySelector(q).style.display = qz ? 'none' : '');   // 测验里不提供辅助
+  ['.aim-ctl','#routeCtl','#selCue','#cueNote','#btnFan'].forEach(q=> document.querySelector(q).style.display = qz ? 'none' : '');   // 测验里不提供辅助
   syncNudge();
   if (qz){ startQuiz(); return; }
   if (Q.on){                       // 离开测验：恢复显示答案
@@ -2065,13 +2179,37 @@ function setAimOff(v, silent){
 }
 document.getElementById('aimOff').addEventListener('input', e=> setAimOff(+e.target.value));
 document.getElementById('btnAimC').addEventListener('click', ()=> setAimOff(0));
-function setBank(v){
-  S.bank = v || null;
-  document.getElementById('selBank').value = S.bank || '';
+/* 红球线路：seq = 依次碰的库边（空 = 直接进袋） */
+function setRoute(seq){
+  S.banks = seq.slice(0,3);
   update();
   followCam();
 }
-document.getElementById('selBank').addEventListener('change', e=> setBank(e.target.value));
+function updateRouteUI(){
+  const n = S.banks.length, lbl = document.getElementById('routeLbl');
+  document.getElementById('selRoute').value = String(n);
+  document.getElementById('routeNav').style.display = n ? 'inline-flex' : 'none';
+  if (!n) return;
+  const list = validRoutes(n), i = list.findIndex(r=>sameSeq(r.seq, S.banks));
+  lbl.textContent = i>=0 ? `${i+1}/${list.length} · ${seqLabel(S.banks)}` : `${seqLabel(S.banks)} · 此线路打不进（共 ${list.length} 条可行）`;
+  lbl.style.color = i>=0 ? '' : 'var(--hard)';
+}
+document.getElementById('selRoute').addEventListener('change', e=>{
+  const n = +e.target.value;
+  if (!n){ setRoute([]); return; }
+  const list = validRoutes(n);
+  setRoute(list.length ? list[0].seq : routeSeqs(n)[0]);
+});
+function stepRoute(dir){
+  const n = S.banks.length; if (!n) return;
+  const list = validRoutes(n); if (!list.length) return;
+  let i = list.findIndex(r=>sameSeq(r.seq, S.banks));
+  i = i<0 ? (dir>0 ? 0 : list.length-1) : (i+dir+list.length)%list.length;
+  setRoute(list[i].seq);
+}
+document.getElementById('btnRoutePrev').addEventListener('click', ()=>stepRoute(-1));
+document.getElementById('btnRouteNext').addEventListener('click', ()=>stepRoute(1));
+document.getElementById('selCue').addEventListener('change', e=>{ S.cueCush = +e.target.value; update(); });
 document.getElementById('btnFan').addEventListener('click', function(){
   S.showFan = !S.showFan;
   this.style.opacity = S.showFan ? 1 : 0.5;
