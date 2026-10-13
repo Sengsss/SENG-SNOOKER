@@ -841,7 +841,7 @@ function cushionAt(p){
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let padDots3, cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let padHandle3, padDots3, cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -1047,6 +1047,14 @@ function init3d(){
   engPath3 = rib(0x7ad0f5, 6, 10, 10);
   engCb3 = new THREE.Mesh(new THREE.RingGeometry(Rm*0.9, Rm, 40), new THREE.MeshBasicMaterial({color:0x7ad0f5, side:THREE.DoubleSide, transparent:true, opacity:0.9}));
   engCb3.rotation.x = -Math.PI/2; scene3.add(engCb3);
+  padHandle3 = new THREE.Group();
+  [[0.034,0x1c1915,0.55],[0.028,0xffd84a,1]].forEach(([r,col,op],i)=>{
+    const m = new THREE.Mesh(new THREE.RingGeometry(r*0.62, r, 32), new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:op, depthTest:false, side:THREE.DoubleSide}));
+    m.renderOrder = 7+i; padHandle3.add(m);
+  });
+  const hc = new THREE.Mesh(new THREE.CircleGeometry(0.011, 20), new THREE.MeshBasicMaterial({color:0xffd84a, depthTest:false}));
+  hc.renderOrder = 9; padHandle3.add(hc);
+  padHandle3.rotation.x = -Math.PI/2; padHandle3.scale.setScalar(1.8); padHandle3.visible = false; scene3.add(padHandle3);
   padDots3 = [0,1,2].map(()=>{
     const m = new THREE.Mesh(new THREE.CircleGeometry(0.012, 20), new THREE.MeshBasicMaterial({color:0xffd84a, depthTest:false}));
     m.rotation.x = -Math.PI/2; m.renderOrder = 6; m.visible = false; scene3.add(m); return m;
@@ -1117,11 +1125,16 @@ function init3d(){
         cands.push(['cue', S.cue, 80]);
         if (S.mode!=='pad') cands.push(['obj', S.obj, 80]);
       }
-      if (S.mode==='pad') cands.push(['padaim', {x:S.cue.x+Math.cos(S.padAng)*700, y:S.cue.y+Math.sin(S.padAng)*700}, 70]);
+      if (S.mode==='pad') cands.push(['padaim', padHandlePos(), 80]);
       if (camMode!=='player' && S.mode==='escape') cands.push(['blk', S.blk, 80]);
       cands.forEach(([k,pt,mm])=>{ const r = dist(pm,pt)/hitRad(mm,pt); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
     }
     if (best){ drag3 = best.k; dragOff3 = {x:best.pt.x-pm.x, y:best.pt.y-pm.y}; e.preventDefault(); return; }
+    /* 白球线路：在台面任意位置按下 / 拖动 = 让出杆方向指向那里 */
+    if (S.mode==='pad' && pm){
+      S.padAng = Math.atan2(pm.y-S.cue.y, pm.x-S.cue.x); drag3 = 'padaim'; dragOff3 = {x:0, y:0};
+      syncPad(); update(); followCam(); e.preventDefault(); return;
+    }
     /* 没抓到：点袋口 = 选目标袋；点台边 = 设置借库 */
     const th = new THREE.Vector3();
     if (ray.ray.intersectPlane(tablePlane, th)){
@@ -1151,7 +1164,7 @@ function init3d(){
       e.preventDefault(); return;
     }
     if (drag3==='padaim'){
-      S.padAng = Math.atan2(p.y-S.cue.y, p.x-S.cue.x); syncPad(); update(); e.preventDefault(); return;
+      S.padAng = Math.atan2(p.y-S.cue.y, p.x-S.cue.x); syncPad(); update(); followCam(); e.preventDefault(); return;
     }
     const b=S[drag3];
     b.x=clamp(p.x,-L/2+R,L/2-R);
@@ -2066,6 +2079,7 @@ let escCur = null;
 function hidePotVisuals(){
   [fanOuter3, fanInner3, mirror3, mirrorLine3, cuePath3, aim3, ball3.target, bounceRing3, bounceLine3,
    edgeL3, edgeR3, contact3, arc3, engCb3, engPath3, lnOP3, lnCG3, ghost3, ghostRing3].forEach(o=>{ o.visible = false; });
+  padHandle3.visible = false;
   bankStrip3.forEach(m=>{ m.visible = false; });
 }
 
@@ -2090,6 +2104,11 @@ function padPath(){
   return {pts, ext, sides, hitPts, risk, next, len:pathLen(pts)};
 }
 let padAimPt = null;
+function padHandlePos(){
+  const c = S.cue, dir = {x:Math.cos(S.padAng), y:Math.sin(S.padAng)}, f = firstPlane(c, dir);
+  const d = Math.max(150, Math.min(700, (f ? f.t : 700)*0.55));      // 把手放在第一段线上，离白球不会太远 / 太近
+  return {x:c.x+dir.x*d, y:c.y+dir.y*d};
+}
 function syncPad(){
   let deg = S.padAng*180/Math.PI; while (deg>180) deg-=360; while (deg<-180) deg+=360;
   document.getElementById('padAng').value = deg.toFixed(1);
@@ -2099,12 +2118,12 @@ function updatePad3D(){
   hidePotVisuals();
   ball3.obj.visible = false; ball3.blk.visible = false;
   const c = S.cue, pp = padPath();
-  padAimPt = {x:c.x+Math.cos(S.padAng)*700, y:c.y+Math.sin(S.padAng)*700};
+  padAimPt = padHandlePos();
   placeCue3(padAimPt);
   lnCG3.material.color.set(pp.risk ? 0xff5252 : 0x6fc3ff);
   setLine3(lnCG3, pp.pts.length>1 ? pp.pts : [c, {x:c.x+1,y:c.y}], 0.0044);
   if (pp.ext){ setLine3(cuePath3, pp.ext, 0.0052); }
-  aim3.position.set(padAimPt.x*MM, 0.006, padAimPt.y*MM); aim3.scale.setScalar(1.9); aim3.visible = true;     // 方向把手，放大好抓
+  padHandle3.position.set(padAimPt.x*MM, 0.008, padAimPt.y*MM); padHandle3.visible = true;     // 方向把手：亮黄色大圆环，好找好抓
   padDots3.forEach((m,i)=>{
     const hp = pp.hitPts[i]; m.visible = !!hp;
     if (hp) m.position.set(hp.x*MM, 0.007, hp.y*MM);
@@ -2376,7 +2395,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v22');
+    add('版本缓存', 'v23');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2454,7 +2473,7 @@ document.getElementById('segMode').addEventListener('click', e=>{
     S.showAnswer = true; S.banks = [];
     if (S.cueCush<1){ S.cueCush = 2; document.getElementById('selCue').value = '2'; }
     syncPad();
-    hint('白球线路：目标球已拿走。拖白球 / 用 ◀ ▶ 平行移动白球，拖金点或 ↑ ↓ 键（Shift 微调）改出杆角，选走 1/2/3 库');
+    hint('白球线路：目标球已拿走。拖白球 / ◀ ▶ = 平行移动；在台面上按住拖动 = 指向那里（或拖黄色圆环、滑条、↑ ↓ 键）；选走 1/2/3 库');
     update(); followCam();
     return;
   }
