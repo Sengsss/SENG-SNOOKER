@@ -90,6 +90,7 @@
   .route-ctl{display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;}
   .route-nav{display:inline-flex; align-items:center; gap:6px; font-size:13px;}
   .route-nav .btn{padding:6px 12px;}
+  .pad-lbl{position:absolute; left:0; top:0; width:22px; height:22px; border-radius:50%; background:#ffd84a; color:#1c1915; font-weight:800; font-size:13px; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:4; border:2px solid #1c1915;}
   .cue-note{font-size:12px; color:var(--muted); flex-basis:100%;}
   .hint{font-size:12px; color:var(--muted); margin-left:auto;}
   .stage{width:100%; max-width:1080px; position:relative;}
@@ -122,7 +123,7 @@
   .overlap-card svg{width:100%; flex:1; display:block;}
   .overlap-card.masked svg, .overlap-card.masked .ov-label{visibility:hidden;}
   .overlap-card.masked{position:relative;}
-  .overlap-card.masked::after{content:'答案已隐藏'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px;}
+  .overlap-card.masked::after{content:attr(data-msg); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px;}
   .ov-label{display:flex; align-items:baseline; gap:10px; margin-top:6px;}
   .ov-label #ovFrac{font-size:24px; font-weight:700; color:var(--brass);}
   .ov-std{font-size:12px; color:var(--muted);}
@@ -182,6 +183,7 @@
     <button data-m="free" class="on">自由摆放</button>
     <button data-m="random">系统随机</button>
     <button data-m="escape">解斯诺克</button>
+    <button data-m="pad">白球线路</button>
     <button data-m="quiz">测验</button>
   </div>
   <select id="selDiff" style="display:none;">
@@ -211,6 +213,10 @@
     <option value="2">白球走位：2 库</option>
     <option value="3">白球走位：3 库</option>
   </select>
+  <span class="aim-ctl" id="padCtl" style="display:none;">出杆角
+    <input type="range" id="padAng" min="-180" max="180" step="0.1" value="0">
+    <span id="padAngTxt" style="min-width:3.6em;display:inline-block;text-align:right;"></span>
+  </span>
   <span class="cue-note" id="cueNote"></span>
   <span class="aim-ctl">瞄准点
     <input type="range" id="aimOff" min="-43" max="43" step="1" value="0">
@@ -516,6 +522,7 @@ const S = {
   showFan: true,
   eng: {b:0, h:0, dl:0, mu:0},   // 加塞：击球点偏移 b(右+)/h(上+) mm；路线偏移 dl mm(右+，待实测)；球间摩擦 mu(待实测，0=不算)
   aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
+  padAng: -0.55,     // 「白球线路」模式：出杆方向（弧度，SVG 坐标，y 向下）
   blk: {x:500, y:150},   // 解斯诺克模式的障碍球
   banks: [],       // 红球线路：依次碰的库边，如 ['top','right']（0~3 库；空 = 直接进袋）
   cueCush: 0,      // 白球碰球后的理想走位：画到第几库（0 = 不显示）
@@ -834,7 +841,7 @@ function cushionAt(p){
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let padDots3, cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -1040,6 +1047,10 @@ function init3d(){
   engPath3 = rib(0x7ad0f5, 6, 10, 10);
   engCb3 = new THREE.Mesh(new THREE.RingGeometry(Rm*0.9, Rm, 40), new THREE.MeshBasicMaterial({color:0x7ad0f5, side:THREE.DoubleSide, transparent:true, opacity:0.9}));
   engCb3.rotation.x = -Math.PI/2; scene3.add(engCb3);
+  padDots3 = [0,1,2].map(()=>{
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.012, 20), new THREE.MeshBasicMaterial({color:0xffd84a, depthTest:false}));
+    m.rotation.x = -Math.PI/2; m.renderOrder = 6; m.visible = false; scene3.add(m); return m;
+  });
   [aim3, cuePath3, mirrorLine3, qAim3, qErr3, qPath3, engPath3, engCb3].forEach(o=>{ o.visible = false; });
 
   /* 击球训练辅助：瞄准线两侧边线（白球外缘）、接触点、角度弧、球杆 */
@@ -1102,7 +1113,11 @@ function init3d(){
     if (pm){
       const cands = [];
       if (S.showAnswer && S.mode!=='escape') cands.push(['aim', pocketAim(), 50]);
-      if (camMode!=='player' && (S.mode==='free' || S.mode==='escape')){ cands.push(['cue', S.cue, 80]); cands.push(['obj', S.obj, 80]); }
+      if (camMode!=='player' && (S.mode==='free' || S.mode==='escape' || S.mode==='pad')){
+        cands.push(['cue', S.cue, 80]);
+        if (S.mode!=='pad') cands.push(['obj', S.obj, 80]);
+      }
+      if (S.mode==='pad') cands.push(['padaim', {x:S.cue.x+Math.cos(S.padAng)*700, y:S.cue.y+Math.sin(S.padAng)*700}, 70]);
       if (camMode!=='player' && S.mode==='escape') cands.push(['blk', S.blk, 80]);
       cands.forEach(([k,pt,mm])=>{ const r = dist(pm,pt)/hitRad(mm,pt); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
     }
@@ -1135,11 +1150,14 @@ function init3d(){
       setAimOff((p.x-c.x)*md.x + (p.y-c.y)*md.y);
       e.preventDefault(); return;
     }
+    if (drag3==='padaim'){
+      S.padAng = Math.atan2(p.y-S.cue.y, p.x-S.cue.x); syncPad(); update(); e.preventDefault(); return;
+    }
     const b=S[drag3];
     b.x=clamp(p.x,-L/2+R,L/2-R);
     b.y=clamp(p.y,-W/2+R,W/2-R);
     [['cue',S.cue],['obj',S.obj],['blk',S.blk]].forEach(([k,other])=>{      // 球与球不重叠（障碍球只在解斯诺克模式里存在）
-      if (k===drag3 || (k==='blk' && S.mode!=='escape')) return;
+      if (k===drag3 || (k==='blk' && S.mode!=='escape') || (k==='obj' && S.mode==='pad')) return;
       if (dist(b,other)<2*R+2){
         const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
         b.x=other.x+dx/d*(2*R+2); b.y=other.y+dy/d*(2*R+2);
@@ -1159,6 +1177,7 @@ function init3d(){
     cam3.position.copy(camPos); cam3.lookAt(camLook);
     renderer3.render(scene3,cam3);
     placeHudLabels();
+    placePadLabels();
   })();
 
   window.addEventListener('resize', resize3d);
@@ -1189,6 +1208,10 @@ function setHudMode(){
 /* 机位参照点：显示答案时看假想球；隐藏时只朝向红球，否则机位本身就泄露瞄准线 */
 let escAimPt = null;      // 解斯诺克：当前线路第一段的终点（球杆 / 机位朝向它）
 function camRefPoint(){
+  if (S.mode==='pad'){
+    const a = padAimPt || S.obj;
+    return new THREE.Vector3(a.x*MM, R*MM, a.y*MM);
+  }
   if (S.mode==='escape'){
     const a = (S.showAnswer && escAimPt) ? escAimPt : S.obj;
     return new THREE.Vector3(a.x*MM, R*MM, a.y*MM);
@@ -1573,6 +1596,7 @@ function update(){
     const dp = POCKET_GEO[S.pk].drop;
     ball3.target.position.set(dp.x*MM, 0.004, dp.y*MM);
     const pa = pocketAim();
+    aim3.scale.setScalar(1);
     aim3.visible = S.showAnswer && S.mode!=='quiz';
     aim3.position.set(pa.x*MM, 0.006, pa.y*MM);
     mirrorLine3.visible = false;
@@ -1611,6 +1635,7 @@ function update(){
       else { m.scale.set(W*MM,1,1); m.position.set(fc*MM,0.047+i*0.002,0); m.rotation.y=Math.PI/2; }
     });
     const escMode = S.mode==='escape';
+    ball3.obj.visible = S.mode!=='pad';
     ball3.blk.visible = escMode;
     if (escMode) ball3.blk.position.set(S.blk.x*MM, R*MM, S.blk.y*MM);
     const showBounce = S.showAnswer && pj.status!=='clear' && pj.hits.length>0 && !escMode;
@@ -1621,6 +1646,7 @@ function update(){
       setLine3(bounceLine3, pj.pts.slice(pj.pts.indexOf(h0.pos)), 0.0058);
     }
     if (escMode) updateEscape3D();
+    if (S.mode==='pad') updatePad3D();
   }
 
   /* 叠球图 */
@@ -1628,8 +1654,8 @@ function update(){
 
   /* 击球训练 HUD（3D 视图 + 显示答案时） */
   const hud = document.getElementById('hud3');
-  hud.style.display = (S.showAnswer && S.mode!=='escape') ? 'block' : 'none';
-  if (S.showAnswer && S.mode!=='escape'){
+  hud.style.display = (S.showAnswer && S.mode!=='escape' && S.mode!=='pad') ? 'block' : 'none';
+  if (S.showAnswer && S.mode!=='escape' && S.mode!=='pad'){
     document.getElementById('hAng').textContent = a.toFixed(1)+'°';
     document.getElementById('hShift').textContent = (2*R*Math.sin(Math.min(a,90)*Math.PI/180)).toFixed(1)+' mm';
     document.getElementById('hThick').textContent = thickText(a);
@@ -1674,13 +1700,15 @@ function update(){
     : '无直进角度';
 
   if (S.mode==='escape') escapeStats();
+  if (S.mode==='pad') padStats();
   updateRouteUI();
   updateEnglish();
 
   /* 隐藏答案：凡是能反推假想球 / 切角 / 能否进袋的读数一律遮住，只留红球行程 */
   const ovCard = document.querySelector('.overlap-card');
   const ovQuiz = Q.on && Q.type==='ov';
-  ovCard.classList.toggle('masked', !S.showAnswer && !ovQuiz);
+  ovCard.classList.toggle('masked', (!S.showAnswer && !ovQuiz) || S.mode==='pad');
+  ovCard.dataset.msg = S.mode==='pad' ? '此模式没有目标球' : '答案已隐藏';
   setOvDetail(S.showAnswer || !ovQuiz);
   updateQuizLayer();
   if (!S.showAnswer){
@@ -1895,9 +1923,10 @@ document.getElementById('btnStatsClear').addEventListener('click', ()=>{
    不依赖系统的按键重复——那个有约 0.5 秒的起步延迟，手感「一顿一顿」。 */
 const NUDGE = {src:{key:0, btn:0}, dir:0, fine:false, t0:0, last:0, raf:0};
 function nudgeMm(mm){
-  if (S.mode!=='free' && S.mode!=='random' && S.mode!=='escape') return;
+  if (S.mode!=='free' && S.mode!=='random' && S.mode!=='escape' && S.mode!=='pad') return;
   let rx = 1, ry = 0;
-  if (camMode!=='top'){
+  if (S.mode==='pad'){ rx = -Math.sin(S.padAng); ry = Math.cos(S.padAng); }          // 白球沿垂直于出杆方向平行移动
+  if (S.mode!=='pad' && camMode!=='top'){
     const ref = S.mode==='escape' ? ((S.showAnswer && escAimPt) ? escAimPt : S.obj) : (S.showAnswer ? ghostPos() : S.obj);
     const dx = ref.x-S.cue.x, dy = ref.y-S.cue.y, l = Math.hypot(dx,dy)||1;
     rx = -dy/l; ry = dx/l;
@@ -1906,7 +1935,7 @@ function nudgeMm(mm){
   b.x = clamp(b.x+rx*mm, -L/2+R, L/2-R);
   b.y = clamp(b.y+ry*mm, -W/2+R, W/2-R);
   const o = S.obj;
-  if (dist(b,o) < 2*R+2){
+  if (S.mode!=='pad' && dist(b,o) < 2*R+2){
     const dx = b.x-o.x, dy = b.y-o.y, d = Math.hypot(dx,dy)||1;
     b.x = o.x+dx/d*(2*R+2); b.y = o.y+dy/d*(2*R+2);
   }
@@ -1932,7 +1961,7 @@ function nudgeSync(fine){
   }
 }
 function syncNudge(){
-  document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random' || S.mode==='escape') ? 'flex' : 'none';
+  document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random' || S.mode==='escape' || S.mode==='pad') ? 'flex' : 'none';
 }
 function nudgeKeyOk(e){
   if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return false;
@@ -2034,13 +2063,97 @@ function escapeRoutes(n){
   return routeSeqs(n).map(escapeEval).filter(r=>r.ok).sort((a,b)=>a.len-b.len);
 }
 let escCur = null;
+function hidePotVisuals(){
+  [fanOuter3, fanInner3, mirror3, mirrorLine3, cuePath3, aim3, ball3.target, bounceRing3, bounceLine3,
+   edgeL3, edgeR3, contact3, arc3, engCb3, engPath3, lnOP3, lnCG3, ghost3, ghostRing3].forEach(o=>{ o.visible = false; });
+  bankStrip3.forEach(m=>{ m.visible = false; });
+}
+
+/* ================= 白球线路：拿走目标球，只看白球走 1/2/3 库 =================
+   出杆角固定，白球平行移动时线路怎么变；每次碰库入射角 = 反射角；不含旋转 / 摩擦 / 吃速度。 */
+function padPath(){
+  const c = S.cue, n = S.cueCush;
+  let dir = {x:Math.cos(S.padAng), y:Math.sin(S.padAng)}, pos = {x:c.x, y:c.y};
+  const pts = [pos], sides = [], hitPts = [];
+  let risk = false;
+  for (let k=0; k<n; k++){
+    const f = firstPlane(pos, dir);
+    if (!f) break;
+    pts.push(f.pos); hitPts.push(f.pos); sides.push(f.key);
+    if (!bankOnCushion(f.pos, BANKS[f.key])){ risk = true; return {pts, ext:null, sides, hitPts, risk, len:pathLen(pts)}; }
+    dir = reflectDir(dir, BANKS[f.key]); pos = f.pos;
+  }
+  const f2 = firstPlane(pos, dir), len = Math.min(f2 ? f2.t : 1200, 1200);       // 之后的方向再延伸一段（淡色）
+  const ext = [pos, {x:pos.x+dir.x*len, y:pos.y+dir.y*len}];
+  let next = null;
+  if (f2){ next = f2.key; if (!bankOnCushion(f2.pos, BANKS[f2.key])) risk = true; }
+  return {pts, ext, sides, hitPts, risk, next, len:pathLen(pts)};
+}
+let padAimPt = null;
+function syncPad(){
+  let deg = S.padAng*180/Math.PI; while (deg>180) deg-=360; while (deg<-180) deg+=360;
+  document.getElementById('padAng').value = deg.toFixed(1);
+  document.getElementById('padAngTxt').textContent = deg.toFixed(1)+'°';
+}
+function updatePad3D(){
+  hidePotVisuals();
+  ball3.obj.visible = false; ball3.blk.visible = false;
+  const c = S.cue, pp = padPath();
+  padAimPt = {x:c.x+Math.cos(S.padAng)*700, y:c.y+Math.sin(S.padAng)*700};
+  placeCue3(padAimPt);
+  lnCG3.material.color.set(pp.risk ? 0xff5252 : 0x6fc3ff);
+  setLine3(lnCG3, pp.pts.length>1 ? pp.pts : [c, {x:c.x+1,y:c.y}], 0.0044);
+  if (pp.ext){ setLine3(cuePath3, pp.ext, 0.0052); }
+  aim3.position.set(padAimPt.x*MM, 0.006, padAimPt.y*MM); aim3.scale.setScalar(1.9); aim3.visible = true;     // 方向把手，放大好抓
+  padDots3.forEach((m,i)=>{
+    const hp = pp.hitPts[i]; m.visible = !!hp;
+    if (hp) m.position.set(hp.x*MM, 0.007, hp.y*MM);
+  });
+  padLabelPts = pp.hitPts.map(p=>V3(p.x, 0.02, p.y));
+  /* 说明文字：依次碰的库、入射角、路程 */
+  const inc = pp.hitPts.length ? (()=>{                      // 第一库入射角（与库边法线的夹角）
+    const k = pp.sides[0], b = BANKS[k], ang = Math.abs(Math.atan2(b.axis==='y' ? Math.cos(S.padAng) : Math.sin(S.padAng), b.axis==='y' ? Math.abs(Math.sin(S.padAng)) : Math.abs(Math.cos(S.padAng))));
+    return (90-ang*180/Math.PI);
+  })() : null;
+  const seq = pp.sides.map(k=>SIDE_SHORT[k]).join('→');
+  document.getElementById('cueNote').textContent =
+    `白球线路（理想·无旋转）：${pp.sides.length ? '依次碰 '+seq : '直线出杆，不碰库'}` +
+    (inc!=null ? ` · 第 1 库入射角 ${inc.toFixed(1)}°（与库边夹角）` : '') +
+    ` · 路程 ${(pp.len/1000).toFixed(2)} m` +
+    (pp.risk ? ' · ⚠ 路线撞向袋口（可能落袋）' : (pp.next ? `；若继续，下一库是 ${SIDE_SHORT[pp.next]}` : '')) +
+    '。真实走位会因旋转、速度而不同。';
+}
+let padLabelPts = [];
+function placePadLabels(){
+  const wrap = document.getElementById('wrap3d');
+  const els = [...wrap.querySelectorAll('.pad-lbl')];
+  while (els.length<3){ const e = document.createElement('div'); e.className = 'pad-lbl'; e.textContent = String(els.length+1); wrap.appendChild(e); els.push(e); }
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  els.forEach((e,i)=>{
+    const p = (S.mode==='pad' && ready3) ? padLabelPts[i] : null;
+    if (!p){ e.style.display = 'none'; return; }
+    const v = p.clone().project(cam3);
+    if (v.z>1){ e.style.display = 'none'; return; }
+    e.style.display = 'flex';
+    e.style.transform = `translate(${(v.x*0.5+0.5)*w}px, ${(-v.y*0.5+0.5)*h}px) translate(-50%,-50%)`;
+  });
+}
+function padStats(){
+  const $ = id=>document.getElementById(id), pp = padPath();
+  ['angVal','fullVal','objDistVal','sideVal','diffVal','potVal','fanVal','aimVal'].forEach(id=>{ $(id).textContent = '—'; });
+  $('diffVal').className = 'val'; $('potVal').className = 'val';
+  $('cueDistVal').textContent = (pp.len/1000).toFixed(2)+' m';
+  $('potVal').textContent = pp.risk ? '⚠ 可能落袋' : '安全';
+  $('potVal').className = 'val '+(pp.risk ? 'hard' : 'easy');
+}
+
 function updateEscape3D(){
   const cur = escCur = escapeEval(S.banks);
   escAimPt = cur.pts.length>1 ? cur.pts[1] : null;
   /* 进袋相关的东西在这个模式里都不用 */
-  [fanOuter3, fanInner3, mirror3, mirrorLine3, cuePath3, aim3, ball3.target, bounceRing3, bounceLine3,
-   edgeL3, edgeR3, contact3, arc3, engCb3, engPath3, lnOP3, lnCG3, ghost3, ghostRing3].forEach(o=>{ o.visible = false; });
+  hidePotVisuals();
   const show = S.showAnswer;
+  bankStrip3.forEach((m,i)=>{ const key = S.banks[i]; m.visible = show && !!key; });
   placeCue3(show && escAimPt ? escAimPt : S.obj);
   document.getElementById('cueNote').textContent = '';
   const note = document.getElementById('cueNote');
@@ -2263,7 +2376,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v21');
+    add('版本缓存', 'v22');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2312,15 +2425,19 @@ document.getElementById('segMode').addEventListener('click', e=>{
   b.classList.add('on');
   const prev = S.mode;
   S.mode = b.dataset.m;
-  const rnd = S.mode==='random', qz = S.mode==='quiz', esc = S.mode==='escape';
+  const rnd = S.mode==='random', qz = S.mode==='quiz', esc = S.mode==='escape', pad = S.mode==='pad';
   document.getElementById('selDiff').style.display = (rnd||qz)?'':'none';
   document.getElementById('btnNext').style.display = (rnd||qz||esc)?'':'none';
   document.getElementById('btnNext').textContent = qz ? '跳过 ⏭' : '换一题 ⟳';
-  document.getElementById('btnAnswer').style.display = qz ? 'none' : '';
+  document.getElementById('btnAnswer').style.display = (qz||pad) ? 'none' : '';
   document.getElementById('quizBar').style.display = qz ? '' : 'none';
-  document.getElementById('engSec').style.display = (qz||esc) ? 'none' : '';
-  ['.aim-ctl','#selCue','#btnFan'].forEach(q=> document.querySelector(q).style.display = (qz||esc) ? 'none' : '');   // 测验 / 解斯诺克里不需要
-  document.getElementById('routeCtl').style.display = qz ? 'none' : '';
+  document.getElementById('engSec').style.display = (qz||esc||pad) ? 'none' : '';
+  ['.aim-ctl:not(#padCtl)','#btnFan'].forEach(q=> document.querySelector(q).style.display = (qz||esc||pad) ? 'none' : '');   // 测验 / 解斯诺克 / 白球线路里不需要
+  document.getElementById('selCue').style.display = (qz||esc) ? 'none' : '';
+  document.getElementById('padCtl').style.display = pad ? '' : 'none';
+  document.getElementById('routeCtl').style.display = (qz||pad) ? 'none' : '';
+  const cop = document.getElementById('selCue').options;
+  ['白球走位：不显示','白球走位：1 库','白球走位：2 库','白球走位：3 库'].forEach((t,i)=>{ cop[i].textContent = pad ? ['出杆线：不碰库','白球走 1 库','白球走 2 库','白球走 3 库'][i] : t; });
   document.getElementById('cueNote').style.display = qz ? 'none' : '';
   /* 线路下拉框的文字随模式变 */
   const opts = document.getElementById('selRoute').options;
@@ -2332,6 +2449,14 @@ document.getElementById('segMode').addEventListener('click', e=>{
   if (Q.on){                       // 离开测验：恢复显示答案
     Q.on = false; S.showAnswer = true;
     document.getElementById('btnAnswer').textContent = '隐藏答案 👁';
+  }
+  if (pad){
+    S.showAnswer = true; S.banks = [];
+    if (S.cueCush<1){ S.cueCush = 2; document.getElementById('selCue').value = '2'; }
+    syncPad();
+    hint('白球线路：目标球已拿走。拖白球 / 用 ◀ ▶ 平行移动白球，拖金点或 ↑ ↓ 键（Shift 微调）改出杆角，选走 1/2/3 库');
+    update(); followCam();
+    return;
   }
   if (esc){
     hint('解斯诺克：目标球被障碍球（粉）挡住，选「白球走 1/2/3 库」看能打到目标球的线路 · ‹ › 切换 · 可拖球');
@@ -2397,6 +2522,15 @@ function stepRoute(dir){
 }
 document.getElementById('btnRoutePrev').addEventListener('click', ()=>stepRoute(-1));
 document.getElementById('btnRouteNext').addEventListener('click', ()=>stepRoute(1));
+document.getElementById('padAng').addEventListener('input', e=>{ S.padAng = (+e.target.value)*Math.PI/180; syncPad(); update(); followCam(); });
+window.addEventListener('keydown', e=>{
+  if (S.mode!=='pad' || (e.key!=='ArrowUp' && e.key!=='ArrowDown')) return;
+  const t = document.activeElement && document.activeElement.tagName;
+  if (t==='INPUT' || t==='SELECT' || t==='TEXTAREA') return;
+  e.preventDefault();
+  S.padAng += (e.key==='ArrowUp' ? -1 : 1) * (e.shiftKey ? 0.1 : 0.5) * Math.PI/180;
+  syncPad(); update(); followCam();
+});
 document.getElementById('selCue').addEventListener('change', e=>{ S.cueCush = +e.target.value; update(); });
 document.getElementById('btnFan').addEventListener('click', function(){
   S.showFan = !S.showFan;
