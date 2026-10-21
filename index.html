@@ -79,6 +79,19 @@
   .eng-out{font-size:14px; line-height:1.8; background:var(--panel2); border-radius:8px; padding:8px 10px; margin:6px 0; min-height:60px;}
   .eng-note{font-size:12px; color:var(--muted); line-height:1.7;}
   @media (max-width:640px){ .eng-sec{grid-template-columns:1fr;} }
+  .mir-panel{width:100%; max-width:1080px; margin-top:10px;}
+  .mir-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;}
+  .mir-sub{font-size:12px; color:var(--muted); flex:1; min-width:180px;}
+  .mir-bar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; font-size:13px;}
+  #mirPracticeBar{flex-wrap:nowrap;} #mirLbl{flex:1; min-width:0; line-height:1.4;}
+  .mir-steps{font-size:13px; line-height:1.75;}
+  .mir-steps .st{background:var(--panel2); border-radius:8px; padding:7px 10px; margin:6px 0;}
+  .mir-steps .st b.n{display:inline-block; min-width:1.4em; color:var(--brass);}
+  .mir-steps .ok{color:var(--good);} .mir-steps .bad{color:var(--hard);} .mir-steps code{font-size:12px; color:var(--brass); background:rgba(0,0,0,.25); padding:0 4px; border-radius:4px;}
+  .mir-cal{margin-top:8px; font-size:13px;} .mir-cal summary{cursor:pointer; color:var(--muted);}
+  .mir-grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:6px; margin:6px 0;}
+  .mir-grid2 label{display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--muted);}
+  .mir-in{background:var(--panel2); color:var(--text); border:1px solid #4a4234; border-radius:8px; padding:7px; font-size:14px; font-family:inherit; width:100%;}
   .foot-tools{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
   .cal-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:8px 0;}
   .cal-grid label{display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted);}
@@ -184,6 +197,7 @@
     <button data-m="random">系统随机</button>
     <button data-m="escape">解斯诺克</button>
     <button data-m="pad">白球线路</button>
+    <button data-m="mirror">镜像格子</button>
     <button data-m="quiz">测验</button>
   </div>
   <select id="selDiff" style="display:none;">
@@ -272,6 +286,29 @@
   </div>
 </div>
 
+<div class="card mir-panel" id="mirPanel" style="display:none;">
+  <div class="mir-head">
+    <b>镜像格子</b>
+    <span class="mir-sub">理想线路（中杆、不加塞、中等力度）· 8×4 格，格线在库边面上</span>
+    <button class="btn" id="mirFold">收起 ▴</button>
+  </div>
+  <div id="mirBody">
+    <div class="mir-bar">
+      <div class="seg" id="mirMode"><button data-q="0" class="on">练习</button><button data-q="1">心算测验</button></div>
+      <button class="btn" id="mirViewBtn">镜像视图：关</button>
+    </div>
+    <div class="mir-bar" id="mirPracticeBar">
+      <button class="btn" id="mirPrev" aria-label="上一条解法">‹</button>
+      <span id="mirLbl">--</span>
+      <button class="btn" id="mirNext" aria-label="下一条解法">›</button>
+    </div>
+    <div id="mirSteps" class="mir-steps"></div>
+    <div id="mirQuiz" style="display:none;"></div>
+    <details class="mir-cal" id="mirTest"><summary>公式自检（验证 6 条）</summary><div id="mgTestOut"></div></details>
+    <details class="mir-cal" id="mirCal"><summary>实测修正（需球房实测，默认全为 0）</summary><div id="mirCalBody"></div></details>
+  </div>
+</div>
+
 <div class="panel-row">
   <div class="card overlap-card">
     <div class="lbl">叠球图 · 瞄准厚度（击球视角所见）</div>
@@ -318,6 +355,7 @@
   <b>叠球图</b>：红球按 1/8 等分刻度划分，金色高亮 = 白球覆盖面积，下方刻度尺直接读出覆盖量（如 5/8）。满球 0° · 3/4 球 14.5° · 1/2 球 30° · 1/4 球 48.6°（厚度 = 1 − sin 切角）。
   3D 击球视角模拟趴下瞄准时约 28cm 的视线高度——注意同一切角在俯视和低视角下的巨大差异。
   <div class="foot-tools">
+    <button class="btn" id="btnGrid">库边刻度：关</button>
     <button class="btn" id="btnCal">⚙ 校准袋口</button>
     <button class="btn" id="btnDiag">📱 手机自检</button>
   </div>
@@ -519,7 +557,9 @@ const S = {
   eng: {b:0, h:0, dl:0, mu:0},   // 加塞：击球点偏移 b(右+)/h(上+) mm；路线偏移 dl mm(右+，待实测)；球间摩擦 mu(待实测，0=不算)
   aimOff: 0,       // 瞄准点沿袋口方向相对袋心的偏移（mm，正 = 偏向 B 鼻）
   padPt: {x:700, y:-250},   // 「白球线路」模式：你点的击打位置（白球朝它出杆）
-  blk: {x:500, y:150},   // 解斯诺克模式的障碍球
+  blk: {x:500, y:150},
+  mg: {sel:0, view:false, quiz:false, qN:1, force:'mid', collapsed:false},   // 「镜像格子」模式的界面状态
+  showGrid: false,   // 其他模式的库边刻度开关（默认关）   // 解斯诺克模式的障碍球
   banks: [],       // 红球线路：依次碰的库边，如 ['top','right']（0~3 库；空 = 直接进袋）
   cueCush: 0,      // 白球碰球后的理想走位：画到第几库（0 = 不显示）
   mode: 'free',
@@ -534,6 +574,7 @@ try{
 }catch(e){}
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
+const isKick = ()=> S.mode==='escape' || S.mode==='mirror';     // 「白球借库去碰目标球」类模式（共用障碍球 / 拖球逻辑）
 
 /* 借库：球心反弹面 = 库边面向台内退 R。把袋口按镜像法翻到反弹面另一侧，
    红球直线瞄准镜像袋口即可（入射角 = 反射角）；假想球、切角都改用镜像袋口计算。 */
@@ -837,7 +878,7 @@ function cushionAt(p){
 const wrap3d = document.getElementById('wrap3d');
 const MM = 0.001;
 let renderer3, cam3, scene3, ghost3, lnOP3, lnCG3, ball3 = {}, ready3=false;
-let padHandle3, padDots3, cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
+let gridMarks3, mgCopies3, mkRibbon, padHandle3, padDots3, cuePath3, aim3, qAim3, qErr3, qPath3, engCb3, engPath3, mirrorLine3, ghostRing3, quizRing3, bounceRing3, bounceLine3, fanOuter3, fanInner3, mirror3, bankStrip3, edgeL3, edgeR3, contact3, arc3, cue3;
 const hudPts = {pot:null, aim:null, ang:null};
 function setFan3(mesh, tris){
   mesh.geometry.dispose();
@@ -944,6 +985,29 @@ function init3d(){
   bar(cabM, capLong-0.1, 0.78, capShort-0.1, 0, -0.41, 0);   // 顶面略低于台呢，避免共面闪烁
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), new THREE.MeshStandardMaterial({color:0x16181c, roughness:0.9}));
   floor.rotation.x=-Math.PI/2; floor.position.y=-0.8; floor.receiveShadow = true; scene3.add(floor);
+  /* 库边刻度：长库 0–8、短库 0–4，0.5 格一条小刻线；刻在木框上，位置对应库边面（官方规定的台面边界）上的格线 */
+  gridMarks3 = new THREE.Group();
+  const tickM = new THREE.MeshBasicMaterial({color:0xf2e8cf});
+  const gtick = (x,z,w,d)=>{ const m = new THREE.Mesh(new THREE.BoxGeometry(w,0.002,d), tickM); m.position.set(x,0.0515,z); gridMarks3.add(m); };
+  const glabel = (txt,x,z)=>{
+    const cv = document.createElement('canvas'); cv.width = 96; cv.height = 64;
+    const g2 = cv.getContext('2d'); g2.font = 'bold 44px sans-serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    g2.lineWidth = 7; g2.strokeStyle = 'rgba(20,14,8,.9)'; g2.fillStyle = '#fff7da'; g2.strokeText(txt,48,34); g2.fillText(txt,48,34);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.085,0.0567), new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv), transparent:true}));
+    m.rotation.x = -Math.PI/2; m.position.set(x,0.0516,z); gridMarks3.add(m);
+  };
+  const stripZ = Wm/2+cw+0.03, capZ = Wm/2+cw+0.06+capT/2, stripX = Lm/2+cw+0.03, capX = Lm/2+cw+0.06+capT/2;
+  for (let k=0;k<=16;k++){
+    const x = (k*GX/2-L/2)*MM, major = k%2===0;
+    [-1,1].forEach(sg=>gtick(x, sg*stripZ, 0.003, major?0.026:0.014));
+    if (major) [-1,1].forEach(sg=>glabel(String(k/2), x, sg*capZ));
+  }
+  for (let k=0;k<=8;k++){
+    const z = (k*GY/2-W/2)*MM, major = k%2===0;
+    [-1,1].forEach(sg=>gtick(sg*stripX, z, major?0.026:0.014, 0.003));
+    if (major) [-1,1].forEach(sg=>glabel(String(k/2), sg*capX, z));
+  }
+  gridMarks3.visible = false; scene3.add(gridMarks3);
   /* baulk + D + 置球点 */
   const lineM = new THREE.MeshBasicMaterial({color:0xd9d2c0, transparent:true, opacity:0.7});
   const bl = new THREE.Mesh(new THREE.PlaneGeometry(0.004, Wm), lineM);
@@ -1025,6 +1089,7 @@ function init3d(){
     if (outline!==false){ const un = mk(0x06130a, w+5, 0.55, 3); top.add(un); top.userData.under = un; }
     scene3.add(top); return top;
   }
+  mkRibbon = rib;
   lnOP3 = rib(0xffd84a, 9, 0, 0);          // 红球进袋线（颜色随进袋判定变）
   lnCG3 = rib(0x6fc3ff, 6, 0, 0);          // 白球出杆线
   /* 撞鼻反弹可视化（3D） */
@@ -1116,12 +1181,12 @@ function init3d(){
     let best = null;
     if (pm){
       const cands = [];
-      if (S.showAnswer && S.mode!=='escape') cands.push(['aim', pocketAim(), 50]);
-      if (camMode!=='player' && (S.mode==='free' || S.mode==='escape' || S.mode==='pad')){
+      if (S.showAnswer && !isKick()) cands.push(['aim', pocketAim(), 50]);
+      if (camMode!=='player' && (S.mode==='free' || isKick() || S.mode==='pad')){
         cands.push(['cue', S.cue, 80]);
         if (S.mode!=='pad') cands.push(['obj', S.obj, 80]);
       }
-      if (camMode!=='player' && S.mode==='escape') cands.push(['blk', S.blk, 80]);
+      if (camMode!=='player' && isKick()) cands.push(['blk', S.blk, 80]);
       cands.forEach(([k,pt,mm])=>{ const r = dist(pm,pt)/hitRad(mm,pt); if (r<1 && (!best || r<best.r)) best = {k, r, pt}; });
     }
     if (best){ drag3 = best.k; dragOff3 = {x:best.pt.x-pm.x, y:best.pt.y-pm.y}; e.preventDefault(); return; }
@@ -1134,14 +1199,14 @@ function init3d(){
     const th = new THREE.Vector3();
     if (ray.ray.intersectPlane(tablePlane, th)){
       const tp = {x:th.x/MM, y:th.z/MM};
-      let pick = -1, pd = S.mode==='escape' ? 0 : 150;       // 解斯诺克不选袋口
+      let pick = -1, pd = isKick() ? 0 : 150;       // 解斯诺克 / 镜像格子不选袋口
       POCKET_GEO.forEach((g,i)=>{
         const d = Math.min(dist(tp,g.mouthMid), dist(tp,g.drop), dist(tp,POCKETS[i]));
         if (d<pd){ pd = d; pick = i; }
       });
       if (pick>=0){ selectPocket(pick); e.preventDefault(); return; }
       const side = cushionAt(tp);
-      if (side){ setRoute(sameSeq(S.banks,[side]) ? [] : [side]); e.preventDefault(); }
+      if (side){ if (S.mode==='mirror') mgCushionTap(side, tp); else setRoute(sameSeq(S.banks,[side]) ? [] : [side]); e.preventDefault(); }
     }
   });
   renderer3.domElement.addEventListener('pointermove',e=>{
@@ -1165,7 +1230,7 @@ function init3d(){
     b.x=clamp(p.x,-L/2+R,L/2-R);
     b.y=clamp(p.y,-W/2+R,W/2-R);
     [['cue',S.cue],['obj',S.obj],['blk',S.blk]].forEach(([k,other])=>{      // 球与球不重叠（障碍球只在解斯诺克模式里存在）
-      if (k===drag3 || (k==='blk' && S.mode!=='escape') || (k==='obj' && S.mode==='pad')) return;
+      if (k===drag3 || (k==='blk' && !isKick()) || (k==='obj' && S.mode==='pad')) return;
       if (dist(b,other)<2*R+2){
         const dx=b.x-other.x, dy=b.y-other.y, d=Math.hypot(dx,dy)||1;
         b.x=other.x+dx/d*(2*R+2); b.y=other.y+dy/d*(2*R+2);
@@ -1198,9 +1263,10 @@ function resize3d(){
   if (camMode==='top') goTop(true);
 }
 /* 上帝视角高度随画面宽高比自适应：保证整张球台（含木框）刚好装进画面 */
+let camFit = 1;      // 镜像视图需要更大视野时 > 1；其余情况恒为 1
 function topHeight(){
   const t = 2*Math.tan(25*Math.PI/180), a = (cam3 && cam3.aspect) || 1.8;
-  return Math.max(2.35/t, 4.1/(a*t));
+  return Math.max(2.35/t, 4.1/(a*t)) * camFit;
 }
 function goTop(quiet){
   camMode='top';
@@ -1218,6 +1284,10 @@ let escAimPt = null;      // 解斯诺克：当前线路第一段的终点（球
 function camRefPoint(){
   if (S.mode==='pad'){
     const a = padAimPt || S.obj;
+    return new THREE.Vector3(a.x*MM, R*MM, a.y*MM);
+  }
+  if (S.mode==='mirror'){
+    const a = mgAimPt || S.obj;
     return new THREE.Vector3(a.x*MM, R*MM, a.y*MM);
   }
   if (S.mode==='escape'){
@@ -1642,11 +1712,11 @@ function update(){
       if (bk.axis==='y'){ m.scale.set(L*MM,1,1); m.position.set(0,0.047+i*0.002,fc*MM); m.rotation.y=0; }
       else { m.scale.set(W*MM,1,1); m.position.set(fc*MM,0.047+i*0.002,0); m.rotation.y=Math.PI/2; }
     });
-    const escMode = S.mode==='escape';
+    const escMode = S.mode==='escape', mgMode = S.mode==='mirror';
     ball3.obj.visible = S.mode!=='pad';
-    ball3.blk.visible = escMode;
-    if (escMode) ball3.blk.position.set(S.blk.x*MM, R*MM, S.blk.y*MM);
-    const showBounce = S.showAnswer && pj.status!=='clear' && pj.hits.length>0 && !escMode;
+    ball3.blk.visible = escMode || mgMode;
+    if (escMode || mgMode) ball3.blk.position.set(S.blk.x*MM, R*MM, S.blk.y*MM);
+    const showBounce = S.showAnswer && pj.status!=='clear' && pj.hits.length>0 && !escMode && !mgMode;
     bounceRing3.visible = bounceLine3.visible = showBounce;
     if (showBounce){
       const h0 = pj.hits[0];
@@ -1655,6 +1725,8 @@ function update(){
     }
     if (escMode) updateEscape3D();
     if (S.mode==='pad') updatePad3D();
+    if (S.mode==='mirror') updateMirror3D();
+    updateGridMarks();
   }
 
   /* 叠球图 */
@@ -1662,8 +1734,8 @@ function update(){
 
   /* 击球训练 HUD（3D 视图 + 显示答案时） */
   const hud = document.getElementById('hud3');
-  hud.style.display = (S.showAnswer && S.mode!=='escape' && S.mode!=='pad') ? 'block' : 'none';
-  if (S.showAnswer && S.mode!=='escape' && S.mode!=='pad'){
+  hud.style.display = (S.showAnswer && S.mode!=='escape' && S.mode!=='pad' && S.mode!=='mirror') ? 'block' : 'none';
+  if (S.showAnswer && S.mode!=='escape' && S.mode!=='pad' && S.mode!=='mirror'){
     document.getElementById('hAng').textContent = a.toFixed(1)+'°';
     document.getElementById('hShift').textContent = (2*R*Math.sin(Math.min(a,90)*Math.PI/180)).toFixed(1)+' mm';
     document.getElementById('hThick').textContent = thickText(a);
@@ -1708,6 +1780,7 @@ function update(){
     : '无直进角度';
 
   if (S.mode==='escape') escapeStats();
+  if (S.mode==='mirror') mirrorStats();
   if (S.mode==='pad') padStats();
   updateRouteUI();
   updateEnglish();
@@ -1848,7 +1921,7 @@ function quizUI(){
   }
 }
 function updateQuizLayer(){
-  if (!ready3) return;
+  if (!ready3 || S.mode==='mirror') return;      // 镜像格子模式有自己的测验显示
   const G = Q.on && Q.type==='ghost' ? Q.guess : null, res = Q.res;
   qAim3.visible = qErr3.visible = qPath3.visible = false;
   if (!G) return;
@@ -1931,11 +2004,11 @@ document.getElementById('btnStatsClear').addEventListener('click', ()=>{
    不依赖系统的按键重复——那个有约 0.5 秒的起步延迟，手感「一顿一顿」。 */
 const NUDGE = {src:{key:0, btn:0}, dir:0, fine:false, t0:0, last:0, raf:0};
 function nudgeMm(mm){
-  if (S.mode!=='free' && S.mode!=='random' && S.mode!=='escape' && S.mode!=='pad') return;
+  if (S.mode!=='free' && S.mode!=='random' && !isKick() && S.mode!=='pad') return;
   let rx = 1, ry = 0;
   if (S.mode==='pad'){ const A = padAngle(); rx = -Math.sin(A); ry = Math.cos(A); }          // 白球沿垂直于出杆方向左右移动，击打位置不动
   if (S.mode!=='pad' && camMode!=='top'){
-    const ref = S.mode==='escape' ? ((S.showAnswer && escAimPt) ? escAimPt : S.obj) : (S.showAnswer ? ghostPos() : S.obj);
+    const ref = S.mode==='mirror' ? (mgAimPt || S.obj) : S.mode==='escape' ? ((S.showAnswer && escAimPt) ? escAimPt : S.obj) : (S.showAnswer ? ghostPos() : S.obj);
     const dx = ref.x-S.cue.x, dy = ref.y-S.cue.y, l = Math.hypot(dx,dy)||1;
     rx = -dy/l; ry = dx/l;
   }
@@ -1969,7 +2042,7 @@ function nudgeSync(fine){
   }
 }
 function syncNudge(){
-  document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random' || S.mode==='escape' || S.mode==='pad') ? 'flex' : 'none';
+  document.getElementById('nudge').style.display = (S.mode==='free' || S.mode==='random' || isKick() || S.mode==='pad') ? 'flex' : 'none';
 }
 function nudgeKeyOk(e){
   if (e.key!=='ArrowLeft' && e.key!=='ArrowRight') return false;
@@ -2136,7 +2209,7 @@ function placePadLabels(){
   while (els.length<3){ const e = document.createElement('div'); e.className = 'pad-lbl'; e.textContent = String(els.length+1); wrap.appendChild(e); els.push(e); }
   const w = wrap.clientWidth, h = wrap.clientHeight;
   els.forEach((e,i)=>{
-    const p = (S.mode==='pad' && ready3) ? padLabelPts[i] : null;
+    const p = ((S.mode==='pad' || S.mode==='mirror') && ready3) ? padLabelPts[i] : null;
     if (!p){ e.style.display = 'none'; return; }
     const v = p.clone().project(cam3);
     if (v.z>1){ e.style.display = 'none'; return; }
@@ -2215,6 +2288,545 @@ function randomEscape(){
   }
   update(); followCam();
 }
+
+/* ================= 镜像格子：8×4 格坐标 + 镜像解球 =================
+   坐标：x 沿长库 0–8（x=0 是 Bottom/Baulk 库，x=8 是 Top 库），y 沿短库 0–4。
+   y 的方向取官方定义：WPBSA 规则写明「从开球端（Baulk end）看，D 区角上右边的是黄球点、左边的是绿球点」，
+   所以 y=0 的长库在绿球点一侧（从开球端看的左手边，俯视画面的上方），y=4 的长库在黄球点一侧。
+   格线画在库边面上（规则定义的台面边界）；一格 = L/8（长库方向）/ W/4（短库方向），两者差 0.4%，分别换算。
+   心算版：库边面当镜子（x=0/8，y=0/4）。精确版：球心只能到库面内缩一个球半径 R 的边界，用毫米算再换成格。 */
+const GX = L/8, GY = W/4;
+const gridOf = p => ({x:(p.x+L/2)/GX, y:(p.y+W/2)/GY});
+const MG_FACE = {top:{axis:'y', v:0}, bottom:{axis:'y', v:4}, left:{axis:'x', v:0}, right:{axis:'x', v:8}};
+const MG_NAME = {top:'y=0 长库（绿球点侧）', bottom:'y=4 长库（黄球点侧）', left:'x=0 短库（Baulk 底库）', right:'x=8 短库（Top 顶库）'};
+const MG_SHORT = {top:'y0', bottom:'y4', left:'x0', right:'x8'};
+const MG_ALONG = key => BANKS[key].axis==='y' ? 'x' : 'y';          // 沿库方向的坐标轴
+const mgUnit = key => BANKS[key].axis==='y' ? GX : GY;               // 沿库方向一格的毫米数
+const mgSeqLabel = seq => seq.map(k=>MG_SHORT[k]).join('→');
+const gfmt = v => (Math.round(v*10)/10).toFixed(1);
+const gfmt2 = v => v.toFixed(2);
+const gp = g => `(${gfmt(g.x)}, ${gfmt(g.y)})`;
+let mgAimPt = null, mgCur = null, mgList = [], mgCopies = null;
+
+function mgFlip(g, key){
+  const f = MG_FACE[key];
+  return f.axis==='y' ? {x:g.x, y:2*f.v-g.y} : {x:2*f.v-g.x, y:g.y};
+}
+/* 从最后一库往第一库依次翻转（和「袋口依次对最后一库…第一库镜像」同一件事） */
+function mgUnfold(g, seq){
+  const steps = []; let q = g;
+  for (let i=seq.length-1; i>=0; i--){ const nq = mgFlip(q, seq[i]); steps.push({key:seq[i], from:q, to:nq}); q = nq; }
+  return {T:q, steps};
+}
+/* 心算碰库点：白球 → 镜像的直线与第一库的交点（比例法 = cue + (T−cue)·d₁/(d₁+d₂)），之后每次碰库入射角 = 反射角 */
+function mgBouncesMental(gc, T, seq){
+  let pos = {x:gc.x, y:gc.y}, dir = {x:T.x-gc.x, y:T.y-gc.y};
+  const out = [];
+  for (const key of seq){
+    const f = MG_FACE[key], ax = f.axis;
+    if (Math.abs(dir[ax])<1e-9) break;
+    const t = (f.v-pos[ax])/dir[ax], p = {x:pos.x+dir.x*t, y:pos.y+dir.y*t};
+    out.push({key, g:p, t}); pos = p;
+    dir = ax==='y' ? {x:dir.x, y:-dir.y} : {x:-dir.x, y:dir.y};
+  }
+  return out;
+}
+function mgMental(gc, go, seq){
+  const un = mgUnfold(go, seq), men = mgBouncesMental(gc, un.T, seq);
+  let first = null;
+  if (seq.length){
+    const f = MG_FACE[seq[0]], ax = f.axis, d1 = Math.abs(gc[ax]-f.v), d2 = Math.abs(un.T[ax]-f.v);
+    first = {d1, d2, ratio:d1/(d1+d2)};
+  }
+  return {T:un.T, steps:un.steps, bounces:men, first};
+}
+function mgExact(seq){
+  const c = S.cue, T = unfoldTarget(S.obj, seq);
+  let pos = {x:c.x, y:c.y}, dir = {x:T.x-c.x, y:T.y-c.y};
+  const out = [];
+  for (const key of seq){
+    const b = BANKS[key], bp = bankCross(pos, dir, b);
+    if (!bp) break;
+    out.push({key, pmm:bp.pos, g:gridOf(bp.pos)});
+    pos = bp.pos; dir = reflectDir(dir, b);
+  }
+  return {T, Tg:gridOf(T), bounces:out};
+}
+/* 同时给出心算值和精确值，以及每个碰库点沿库方向的差（格 / mm） */
+function mgSolve(seq){
+  const gc = gridOf(S.cue), go = gridOf(S.obj);
+  const men = mgMental(gc, go, seq), ex = mgExact(seq);
+  const diffs = men.bounces.map((m,i)=>{
+    const e = ex.bounces[i]; if (!e) return null;
+    const ax = MG_ALONG(m.key), d = e.g[ax]-m.g[ax];
+    return {dGrid:d, dMm:d*mgUnit(m.key)};
+  });
+  return {gc, go, men, ex, diffs};
+}
+/* 可行性：以「瞄准镜像中心」的直线正向模拟（simulateKick）：每库都是最先碰到的库边、不落袋口，
+   且碰到目标球之前不能先碰障碍球 / 目标球 */
+function mgEval(seq){
+  const c = S.cue, t = S.obj, T = unfoldTarget(t, seq), ang = Math.atan2(T.y-c.y, T.x-c.x);
+  const r = simulateKick(c, ang, seq, t, S.blk);
+  if (r.status!=='hit') return {ok:false, seq, status:r.status, pts:r.pts};
+  const ct = r.contact, n = {x:(t.x-ct.x)/(2*R), y:(t.y-ct.y)/(2*R)};
+  const cut = Math.acos(clamp(r.dir.x*n.x+r.dir.y*n.y, -1, 1))*180/Math.PI;
+  return {ok:true, seq, ang, pts:r.pts, contact:ct, n, dir:r.dir, cut, full:Math.max(0,1-Math.sin(cut*Math.PI/180)), len:pathLen(r.pts)};
+}
+/* 所有可行解：库数少优先，同库数路程短优先 */
+function mgRoutes(){
+  const out = [];
+  for (let n=1; n<=3; n++) routeSeqs(n).forEach(sq=>{ const e = mgEval(sq); if (e.ok) out.push(e); });
+  return out.sort((a,b)=>a.seq.length-b.seq.length || a.len-b.len);
+}
+/* 容错范围：沿第一库移动碰库点（每次 0.02 格），看多宽的范围内仍能碰到目标球 */
+function mgTolerance(ev){
+  const key = ev.seq[0], b = BANKS[key], along = MG_ALONG(key), unit = mgUnit(key);
+  const p0 = ev.pts[1], c = S.cue, step = 0.02*unit;
+  const hit = s=>{
+    const pt = {x:p0.x, y:p0.y}; pt[along] += s;
+    return simulateKick(c, Math.atan2(pt.y-c.y, pt.x-c.x), ev.seq, S.obj, S.blk).status==='hit';
+  };
+  let lo = 0, hi = 0;
+  while (lo>-1.6*unit && hit(lo-step)) lo -= step;
+  while (hi< 1.6*unit && hit(hi+step)) hi += step;
+  const g0 = gridOf(p0)[along];
+  return {lo:g0+lo/unit, hi:g0+hi/unit, center:g0, widthGrid:(hi-lo)/unit, widthMm:hi-lo, along};
+}
+/* 最近参照物：把中袋、开球线、置球点投影到库边，找离碰库点最近的一个 */
+function mgLandmarks(key, coord){
+  const long = BANKS[key].axis==='y';
+  const list = long ? [
+    {n:'底角袋', v:0}, {n:'开球线（棕 / 绿 / 黄球点）', v:737/GX}, {n:'中袋（蓝球点）', v:4},
+    {n:'粉球点', v:(L/4+L/2)/GX}, {n:'黑球点', v:(L-324)/GX}, {n:'顶角袋', v:8}
+  ] : [
+    {n:'绿球点一侧角袋', v:0}, {n:'绿球点', v:(W/2-D_R)/GY}, {n:'中线（棕 / 蓝 / 粉 / 黑球点）', v:2},
+    {n:'黄球点', v:(W/2+D_R)/GY}, {n:'黄球点一侧角袋', v:4}
+  ];
+  let best = null;
+  list.forEach(l=>{ const d = coord-l.v; if (!best || Math.abs(d)<Math.abs(best.d)) best = {n:l.n, v:l.v, d}; });
+  const side = long ? (best.d>0 ? '靠 Top 顶库端' : '靠 Baulk 底库端') : (best.d>0 ? '靠黄球点一侧' : '靠绿球点一侧');
+  return {name:best.n, at:best.v, d:best.d, text:Math.abs(best.d)<0.005 ? `正对 ${best.n}` : `${best.n}${side} ${gfmt2(Math.abs(best.d))} 格`};
+}
+
+/* ----- 实测修正（默认全 0，需球房实测）与实测记录 ----- */
+const MG_CAL_KEY = 'snooker-mirror-cal-v1';
+let mgCal = {corr:{}, log:[]};
+try{
+  const v = JSON.parse(localStorage.getItem(MG_CAL_KEY)||'null');
+  if (v && typeof v==='object'){ mgCal.corr = v.corr||{}; mgCal.log = Array.isArray(v.log) ? v.log.slice(-500) : []; }
+}catch(e){}
+const mgCalSave = ()=>{ try{ localStorage.setItem(MG_CAL_KEY, JSON.stringify(mgCal)); }catch(e){} };
+const mgCorr = (n, force)=> +mgCal.corr[n+'_'+force] || 0;
+const FORCE_NAME = {light:'轻', mid:'中', heavy:'重'};
+
+/* ----- 出题 / 进入 / 离开 ----- */
+function mgRandom(nWanted){
+  const rnd = (lo,hi)=>lo+Math.random()*(hi-lo);
+  S.banks = [];
+  for (let i=0;i<1200;i++){
+    const c = {x:rnd(-L/2+3*R, L/2-3*R), y:rnd(-W/2+3*R, W/2-3*R)}, t = {x:rnd(-L/2+3*R, L/2-3*R), y:rnd(-W/2+3*R, W/2-3*R)};
+    const dx = t.x-c.x, dy = t.y-c.y, D = Math.hypot(dx,dy);
+    if (D<900) continue;
+    const ux = dx/D, uy = dy/D, f = rnd(0.35,0.65), lat = (Math.random()<0.5?-1:1)*rnd(0.1,0.9)*R;
+    const b = {x:c.x+dx*f-uy*lat, y:c.y+dy*f+ux*lat};
+    if (Math.abs(b.x)>L/2-R || Math.abs(b.y)>W/2-R) continue;
+    S.cue = c; S.obj = t; S.blk = b;
+    if (dist(b,c)<2*R+4 || dist(b,t)<2*R+4) continue;
+    const d0 = simulateKick(c, Math.atan2(t.y-c.y, t.x-c.x), [], t, b);
+    if (d0.status!=='blocked') continue;                       // 直线必须被挡
+    const rs = mgRoutes();
+    if (!rs.length) continue;                                 // 至少一个解
+    if (nWanted && !rs.some(r=>r.seq.length===nWanted)) continue;
+    break;
+  }
+  S.mg.seq = null;
+  update(); followCam();
+}
+function mgEnter(){ S.mg.seq = null; S.mg.quiz = false; mgSyncMode(); mgRandom(); }
+function mgLeave(){
+  S.mg.view = false; camFit = 1;
+  if (ready3){ if (mgCopies3) mgCopies3.visible = false; }
+  if (camMode==='top') goTop(true);
+  const bt = document.getElementById('mirViewBtn'); if (bt) bt.textContent = '镜像视图：关';
+}
+
+/* ----- 3D：当前解法的路线、假想球、碰库点标号、镜子台 ----- */
+function updateMirror3D(){
+  hidePotVisuals();
+  mgList = mgRoutes();
+  let ev = null;
+  if (S.mg.seq) ev = mgList.find(r=>sameSeq(r.seq, S.mg.seq)) || null;
+  if (!ev && mgList.length){ ev = mgList[0]; S.mg.seq = ev.seq.slice(); }
+  if (!mgList.length) S.mg.seq = null;
+  mgCur = ev;
+  mgAimPt = ev ? ev.pts[1] : null;
+  const c = S.cue;
+  placeCue3(mgAimPt || S.obj);
+  const q = S.mg.quiz && S.mg.q;
+  if (q && q.phase==='ask'){                                // 心算测验作答中：不显示任何解
+    mgAimPt = null; placeCue3(S.obj);
+    ghost3.visible = ghostRing3.visible = lnOP3.visible = lnCG3.visible = false;
+    bankStrip3.forEach(m=>{ m.visible = false; }); padDots3.forEach(m=>{ m.visible = false; });
+    padLabelPts = []; qPath3.visible = false;
+    mgUpdateMirrorView(null);
+    return;
+  }
+  const prevPts = ev ? ev.pts : simulateKick(c, Math.atan2(S.obj.y-c.y, S.obj.x-c.x), [], S.obj, S.blk).pts;
+  lnCG3.material.color.set(ev ? 0x6fc3ff : 0xff5252);
+  setLine3(lnCG3, prevPts, 0.0044);
+  if (ev){
+    ghost3.position.set(ev.contact.x*MM, R*MM, ev.contact.y*MM); ghost3.visible = true;
+    ghostRing3.position.set(ev.contact.x*MM, 0.0035, ev.contact.y*MM); ghostRing3.visible = true;
+    lnOP3.material.color.set(0xffd84a);
+    setLine3(lnOP3, [S.obj, {x:S.obj.x+ev.n.x*700, y:S.obj.y+ev.n.y*700}], 0.0048);
+  }
+  bankStrip3.forEach((m,i)=>{
+    const key = ev && ev.seq[i]; m.visible = !!key;
+    if (!key) return;
+    const bk = BANKS[key], fc = bk.v + (bk.sign<0?-R:R);
+    if (bk.axis==='y'){ m.scale.set(L*MM,1,1); m.position.set(0,0.047+i*0.002,fc*MM); m.rotation.y=0; }
+    else { m.scale.set(W*MM,1,1); m.position.set(fc*MM,0.047+i*0.002,0); m.rotation.y=Math.PI/2; }
+  });
+  padDots3.forEach((m,i)=>{
+    const hp = ev && ev.pts[i+1] && i<ev.seq.length ? ev.pts[i+1] : null; m.visible = !!hp;
+    if (hp) m.position.set(hp.x*MM, 0.007, hp.y*MM);
+  });
+  padLabelPts = ev ? ev.pts.slice(1, 1+ev.seq.length).map(p=>V3(p.x, 0.02, p.y)) : [];
+  mgUpdateMirrorView(ev);
+  qPath3.visible = false;
+  if (q && q.phase==='result' && q.res && q.res.pts) setLine3(qPath3, q.res.pts, 0.0056);   // 你的瞄点实际走的路（红色虚线）
+  mgRenderSoon();
+}
+function mirrorStats(){
+  const $ = id=>document.getElementById(id), cur = mgCur;
+  ['objDistVal','diffVal','aimVal','sideVal'].forEach(id=>{ $(id).textContent = '—'; });
+  $('diffVal').className = 'val';
+  $('angVal').textContent = cur ? cur.cut.toFixed(1)+'°' : '—';
+  $('fullVal').textContent = cur ? Math.round(cur.full*100)+'%' : '—';
+  $('cueDistVal').textContent = cur ? (cur.len/1000).toFixed(2)+' m' : '—';
+  const pv = $('potVal'); pv.textContent = cur ? '能碰到目标球' : '没有可行解'; pv.className = 'val '+(cur?'easy':'hard');
+  $('fanVal').textContent = cur ? `${mgList.length} 条可行解` : '—';
+  if (cur){
+    const cross = cur.dir.x*cur.n.y-cur.dir.y*cur.n.x;
+    $('sideVal').textContent = cur.cut<4 ? '正面直击' : (cross>0 ? '右切 →' : '← 左切');
+    updateOverlap(cur.cut, cross>0 ? 1 : -1);
+  }
+}
+function updateGridMarks(){ if (gridMarks3) gridMarks3.visible = (S.mode==='mirror' || S.showGrid); }
+
+/* ----- 镜子台（镜像视图）：球心可到达区域（库面内缩 R）依次对各库翻出的拷贝 ----- */
+function mgCorners(){ return [{x:-L/2+R,y:-W/2+R},{x:L/2-R,y:-W/2+R},{x:L/2-R,y:W/2-R},{x:-L/2+R,y:W/2-R}]; }
+function mgUpdateMirrorView(ev){
+  if (!mgCopies3){ mgCopies3 = new THREE.Group(); scene3.add(mgCopies3); }
+  for (let i=mgCopies3.children.length-1;i>=0;i--){
+    const o = mgCopies3.children[i]; mgCopies3.remove(o);
+    o.traverse(q=>{ if (q.geometry) q.geometry.dispose(); if (q.material) q.material.dispose(); });
+  }
+  const on = S.mg.view && ev && !S.mg.quiz;
+  mgCopies3.visible = !!on;
+  const wantFit = on ? mgFit(ev) : 1;
+  if (Math.abs(wantFit-camFit)>1e-3){ camFit = wantFit; if (camMode==='top') goTop(true); }
+  if (!on) return;
+  const mat = ()=>new THREE.MeshBasicMaterial({color:0x7ad0f5, transparent:true, opacity:0.10, side:THREE.DoubleSide, depthWrite:false});
+  const n = ev.seq.length;
+  for (let i=1;i<=n;i++){                                  // 第 i 块镜子台
+    const cs = mgCorners().map(p=>unfoldTarget(p, ev.seq.slice(0,i)));
+    const shp = new THREE.Shape(cs.map(p=>new THREE.Vector2(p.x*MM, -p.y*MM)));
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(shp), mat()); m.rotation.x = -Math.PI/2; m.position.y = 0.0012; mgCopies3.add(m);
+    const edge = mkRibbon(0x7ad0f5, 5, 0, 0, 0.7, false); setLine3(edge, cs.concat([cs[0]]), 0.0016); mgCopies3.add(edge);
+    for (let k=1;k<8;k++){                                  // 格线：把真实台面的格线一起翻过来
+      const a = {x:-L/2+k*GX, y:-W/2}, b = {x:-L/2+k*GX, y:W/2};
+      const ln = mkRibbon(0x7ad0f5, 2, 0, 0, 0.35, false);
+      setLine3(ln, [unfoldTarget(a, ev.seq.slice(0,i)), unfoldTarget(b, ev.seq.slice(0,i))], 0.0016); mgCopies3.add(ln);
+    }
+    for (let k=1;k<4;k++){
+      const a = {x:-L/2, y:-W/2+k*GY}, b = {x:L/2, y:-W/2+k*GY};
+      const ln = mkRibbon(0x7ad0f5, 2, 0, 0, 0.35, false);
+      setLine3(ln, [unfoldTarget(a, ev.seq.slice(0,i)), unfoldTarget(b, ev.seq.slice(0,i))], 0.0016); mgCopies3.add(ln);
+    }
+  }
+  const T = unfoldTarget(S.obj, ev.seq);                    // 目标球镜像
+  const img = new THREE.Mesh(new THREE.SphereGeometry(R*MM,24,16), new THREE.MeshBasicMaterial({color:0xff5a5a, transparent:true, opacity:0.45}));
+  img.position.set(T.x*MM, R*MM, T.y*MM); mgCopies3.add(img);
+  const st = mkRibbon(0xffffff, 4, 20, 14, 0.9, false); setLine3(st, [S.cue, T], 0.0058); mgCopies3.add(st);   // 白球 → 镜像的直线
+}
+function mgFit(ev){                                          // 镜子台超出画面时自动拉远镜头
+  const pts = [S.cue, unfoldTarget(S.obj, ev.seq)];
+  for (let i=1;i<=ev.seq.length;i++) mgCorners().forEach(p=>pts.push(unfoldTarget(p, ev.seq.slice(0,i))));
+  let x0=-L/2,x1=L/2,y0=-W/2,y1=W/2;
+  pts.forEach(p=>{ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); });
+  return Math.max(1, Math.max((x1-x0)/L, (y1-y0)/W)*1.04);
+}
+
+/* ----- 解法面板（练习）：7 步心算步骤 ----- */
+const CN_N = ['零','一','二','三'];
+const mgNames = seq => seq.map(k=>MG_NAME[k].split('（')[0]).join(' → ');
+let mgRaf = 0;
+function mgRenderSoon(){ if (mgRaf) return; mgRaf = setTimeout(()=>{ mgRaf = 0; mgRender(); }, 40); }      // 拖球时合并重绘，窗口在后台也能刷新
+function mgSyncMode(){
+  const qz = S.mg.quiz;
+  document.querySelectorAll('#mirMode button').forEach(b=> b.classList.toggle('on', (b.dataset.q==='1')===qz));
+  document.getElementById('mirPracticeBar').style.display = qz ? 'none' : '';
+  document.getElementById('mirViewBtn').style.display = qz ? 'none' : '';
+  document.getElementById('mirSteps').style.display = qz ? 'none' : '';
+  document.getElementById('mirQuiz').style.display = qz ? '' : 'none';
+  document.getElementById('mirBody').style.display = S.mg.collapsed ? 'none' : '';
+  document.getElementById('mirFold').textContent = S.mg.collapsed ? '展开 ▾' : '收起 ▴';
+}
+function mgStepsHtml(ev){
+  const seq = ev.seq, n = seq.length, sol = mgSolve(seq), tol = mgTolerance(ev), first = seq[0], along = MG_ALONG(first);
+  const m0 = sol.men.bounces[0], f = sol.men.first, fc = MG_FACE[first], ax = fc.axis;
+  let h = '';
+  h += `<div class="st"><b class="n">①</b> 读坐标：白球 <code>${gp(sol.gc)}</code>，目标球 <code>${gp(sol.go)}</code>（单位：格。x 沿长库 0–8，y 沿短库 0–4）</div>`;
+  h += `<div class="st"><b class="n">②</b> 翻转（从最后一库往第一库翻）：<br>` +
+       sol.men.steps.map((st,i)=>`第 ${n-i} 库 ${MG_NAME[st.key]}：<code>${gp(st.from)}</code> → <code>${gp(st.to)}</code>`).join('<br>') +
+       `<br>镜像目标球 = <code>${gp(sol.men.T)}</code></div>`;
+  h += `<div class="st"><b class="n">③</b> 比例（第 1 库 ${MG_NAME[first]}，库面在 ${ax}=${fc.v}）：<br>` +
+       `d₁ = |白球 ${ax} − ${fc.v}| = ${gfmt2(f.d1)}，d₂ = |镜像 ${ax} − ${fc.v}| = ${gfmt2(f.d2)}，比例 = d₁/(d₁+d₂) = ${gfmt2(f.ratio)}<br>` +
+       `碰库点 = 白球 + (镜像 − 白球) × ${gfmt2(f.ratio)} = <code>${gp(m0.g)}</code>` +
+       (n>1 ? `<br>之后每次碰库入射角 = 反射角，沿同一条展开直线前进：` + sol.men.bounces.slice(1).map((b,i)=>`第 ${i+2} 库 <code>${gp(b.g)}</code>`).join('，') : '') + `</div>`;
+  h += `<div class="st"><b class="n">④</b> 结果（心算 = 库面当镜子；精确 = 球心边界，库面内缩 R=${R}mm）：<br>` +
+       sol.men.bounces.map((b,i)=>{
+         const e = sol.ex.bounces[i], d = sol.diffs[i], a = MG_ALONG(b.key);
+         return `第 ${i+1} 库 ${MG_NAME[b.key]}：心算 ${a}=<b>${gfmt(b.g[a])}</b> 格；精确 ${a}=<b>${e?gfmt2(e.g[a]):'—'}</b> 格；差 ${d?gfmt2(d.dGrid)+' 格 ('+Math.round(d.dMm)+' mm)':'—'}`;
+       }).join('<br>') + `</div>`;
+  h += `<div class="st"><b class="n">⑤</b> 容错范围：第 1 库碰库点在 <b>${gfmt2(tol.lo)} – ${gfmt2(tol.hi)}</b> 格（${along} 轴）之间仍能碰到目标球，宽 ${gfmt2(tol.widthGrid)} 格 = ${Math.round(tol.widthMm)} mm（中心瞄准 ${gfmt2(tol.center)}）</div>`;
+  const lm = mgLandmarks(first, m0.g[along]);
+  h += `<div class="st"><b class="n">⑥</b> 最近参照物：第 1 库碰库点 ${along}=${gfmt(m0.g[along])} → <b>${lm.text}</b></div>`;
+  const corr = mgCorr(n, S.mg.force), cnt = mgCal.log.filter(l=>l.n===n && l.force===S.mg.force).length;
+  h += `<div class="st"><b class="n">⑦</b> 修正后瞄点：理想 ${gfmt2(m0.g[along])} + 实测修正 ${gfmt2(corr)} = <b>${gfmt2(m0.g[along]+corr)}</b> 格 ` +
+       `（${CN_N[n]}库 · 力度 ` + ['light','mid','heavy'].map(k=>`<button class="btn" data-force="${k}" style="padding:2px 8px;${S.mg.force===k?'background:var(--brass);color:#1c1915;':''}">${FORCE_NAME[k]}</button>`).join(' ') +
+       `）${cnt? '基于 '+cnt+' 条实测' : '<span class="bad">尚无实测，修正值为 0——需球房实测</span>'}</div>`;
+  return h;
+}
+function mgRender(){
+  if (S.mode!=='mirror') return;
+  mgSyncMode();
+  if (S.mg.quiz) return;
+  const ev = mgCur, i = ev ? mgList.indexOf(ev) : -1;
+  document.getElementById('mirLbl').textContent = ev
+    ? `第 ${i+1} 条 · ${CN_N[ev.seq.length]}库 · ${mgNames(ev.seq)} · 共 ${mgList.length} 条可行`
+    : '没有可行解（点「换一题」或拖动球）';
+  document.getElementById('mirSteps').innerHTML = ev ? mgStepsHtml(ev) : '<div class="st bad">当前球位直线被挡，且 1~3 库都没有可行解。</div>';
+}
+document.getElementById('mirSteps').addEventListener('click', e=>{
+  const b = e.target.closest('[data-force]'); if (!b) return;
+  S.mg.force = b.dataset.force; mgRenderSoon();
+});
+function mgStep(d){
+  if (!mgList.length) return;
+  let i = mgCur ? mgList.indexOf(mgCur) : -1;
+  i = i<0 ? 0 : (i+d+mgList.length)%mgList.length;
+  S.mg.seq = mgList[i].seq.slice(); update();
+}
+document.getElementById('mirPrev').addEventListener('click', ()=>mgStep(-1));
+document.getElementById('mirNext').addEventListener('click', ()=>mgStep(1));
+document.getElementById('mirFold').addEventListener('click', ()=>{ S.mg.collapsed = !S.mg.collapsed; mgSyncMode(); });
+document.getElementById('mirViewBtn').addEventListener('click', function(){
+  S.mg.view = !S.mg.view; this.textContent = '镜像视图：'+(S.mg.view?'开':'关'); update();
+});
+document.getElementById('mirMode').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if (!b) return;
+  S.mg.quiz = b.dataset.q==='1';
+  if (S.mg.quiz){ S.mg.view = false; document.getElementById('mirViewBtn').textContent = '镜像视图：关'; mgNewQuestion(); }
+  else { S.mg.q = null; mgSyncMode(); mgRandom(); }
+});
+document.getElementById('btnGrid').addEventListener('click', function(){
+  S.showGrid = !S.showGrid; this.textContent = '库边刻度：'+(S.showGrid?'开':'关'); update();
+});
+function mgCushionTap(side, tp){
+  if (S.mg.quiz){
+    const q = S.mg.q; if (!q || q.phase!=='ask') return;
+    const along = MG_ALONG(side), g = gridOf(tp);
+    document.getElementById('mqKey').value = side;
+    document.getElementById('mqNum').value = gfmt(g[along]);
+    return;
+  }
+  const r = mgList.find(x=>x.seq[0]===side);
+  if (r){ S.mg.seq = r.seq.slice(); update(); }
+  else hint('没有从 '+MG_NAME[side]+' 出发的可行解');
+}
+
+/* ----- 心算测验 ----- */
+const MG_QUIZ_KEY = 'snooker-mirror-quiz-v1';
+let mgQMem = [];
+function mgQLoad(){ try{ const v = JSON.parse(localStorage.getItem(MG_QUIZ_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return mgQMem; } }
+function mgQSave(a){ mgQMem = a; try{ localStorage.setItem(MG_QUIZ_KEY, JSON.stringify(a)); }catch(e){} }
+/* 不指定库顺序：沿着出杆线自动反射，数够 N 库后看第一个碰到的是不是目标球（数不够 N 库就碰到 = 不算） */
+function simulateKickAuto(c, ang, N, tgt, blk){
+  let pos = {x:c.x, y:c.y}, dir = {x:Math.cos(ang), y:Math.sin(ang)};
+  const pts = [pos], seq = [];
+  for (let leg=0; leg<=N; leg++){
+    const f = firstPlane(pos, dir), last = leg===N, tEnd = f ? f.t : 3000;
+    const end = {x:pos.x+dir.x*tEnd, y:pos.y+dir.y*tEnd}, at = t=>({x:pos.x+(end.x-pos.x)*t, y:pos.y+(end.y-pos.y)*t});
+    const tt = segCircleHit(pos, end, tgt, 2*R), tb = blk ? segCircleHit(pos, end, blk, 2*R) : null;
+    if (tb!==null && (tt===null || tb<tt)) return {status:'blocked', pts:pts.concat([at(tb)]), seq};
+    if (tt!==null){ const p = at(tt); pts.push(p); return {status:last?'hit':'early', pts, seq, contact:p, dir}; }
+    if (last || !f) return {status:'miss', pts:pts.concat([end]), seq};
+    if (!bankOnCushion(f.pos, BANKS[f.key])) return {status:'pocket', pts:pts.concat([f.pos]), seq};
+    pts.push(f.pos); seq.push(f.key); dir = reflectDir(dir, BANKS[f.key]); pos = {x:f.pos.x, y:f.pos.y};
+  }
+  return {status:'miss', pts, seq};
+}
+function mgNewQuestion(){
+  const sel = document.getElementById('mqN');
+  const N = sel ? +sel.value : S.mg.qN;
+  S.mg.qN = N;
+  S.mg.q = {n:N, phase:'ask', t0:performance.now(), res:null};
+  mgSyncMode(); mgRenderQuiz();
+  mgRandom(N);
+}
+function mgRenderQuiz(){
+  const q = S.mg.q, box = document.getElementById('mirQuiz');
+  if (!q){ box.innerHTML = ''; return; }
+  const opt = (v,t,sel)=>`<option value="${v}"${sel?' selected':''}>${t}</option>`;
+  const ask = q.phase==='ask';
+  let h = `<div class="mir-bar">题型 <select id="mqN" class="mir-in" style="width:auto;">${[1,2,3].map(n=>opt(n,CN_N[n]+'库',n===q.n)).join('')}</select> <button class="btn" id="mqNew">新题 ⟳</button> <button class="btn" id="mqStats">统计 📊</button></div>`;
+  h += `<div class="st" style="font-size:13px;line-height:1.7;">目标球被障碍球挡住。<b>心算</b>白球打 <b>${CN_N[q.n]}库</b>去碰目标球：选<b>第一库</b>和<b>碰库点的格数</b>（也可以直接点库边）。</div>`;
+  h += `<div class="mir-bar">第一库 <select id="mqKey" class="mir-in" style="width:auto;"${ask?'':' disabled'}>${Object.keys(MG_NAME).map(k=>opt(k,MG_NAME[k],q.key===k)).join('')}</select>
+        碰库点 <input id="mqNum" class="mir-in" style="width:5.5em;" type="number" step="0.1" min="0" max="8" inputmode="decimal" value="${q.num!=null?q.num:''}"${ask?'':' disabled'}> 格
+        <button class="btn primary" id="mqSubmit">${ask?'提交':'下一题 ➜'}</button></div>`;
+  if (q.res){
+    const r = q.res;
+    h += `<div class="st">${r.hit?'<b class="ok">✓ 碰到目标球</b>':'<b class="bad">✗ 没碰到目标球</b>（'+({blocked:'先碰到障碍球',early:'库数没数够就碰到目标球',miss:'碰不到目标球',pocket:'撞向袋口'}[r.status]||r.status)+'）'}　用时 ${r.secs.toFixed(1)}s<br>` +
+         (r.ideal!=null ? `你的碰库点 <b>${gfmt2(r.guess)}</b> 格，理想 <b>${gfmt2(r.ideal)}</b> 格（${MG_NAME[q.key]}，精确值），误差 <b>${gfmt2(Math.abs(r.errGrid))}</b> 格 = ${Math.round(Math.abs(r.errMm))} mm` : `<span class="bad">你选的第一库（${MG_NAME[q.key]}）没有 ${CN_N[q.n]}库可行解</span>`) + `</div>`;
+  }
+  box.innerHTML = h;
+}
+document.getElementById('mirQuiz').addEventListener('click', e=>{
+  const id = e.target.id;
+  if (id==='mqNew') mgNewQuestion();
+  else if (id==='mqSubmit') mgSubmit();
+  else if (id==='mqStats') mgShowStats();
+});
+document.getElementById('mirQuiz').addEventListener('change', e=>{ if (e.target.id==='mqN') mgNewQuestion(); });
+function mgSubmit(){
+  const q = S.mg.q; if (!q) return;
+  if (q.phase==='result'){ mgNewQuestion(); return; }
+  const key = document.getElementById('mqKey').value, num = parseFloat(document.getElementById('mqNum').value);
+  if (!isFinite(num)){ hint('先填碰库点的格数，或直接点库边'); return; }
+  q.key = key; q.num = num;
+  const b = BANKS[key], along = MG_ALONG(key), unit = mgUnit(key);
+  const pt = b.axis==='y' ? {x:num*GX-L/2, y:b.v} : {x:b.v, y:num*GY-W/2};           // 球心碰库的位置（库面内缩 R）
+  const sim = simulateKickAuto(S.cue, Math.atan2(pt.y-S.cue.y, pt.x-S.cue.x), q.n, S.obj, S.blk);
+  const cand = mgList.filter(r=>r.seq.length===q.n && r.seq[0]===key)[0] || null;
+  const idealG = cand ? gridOf(cand.pts[1])[along] : null;
+  const res = {hit:sim.status==='hit', status:sim.status, pts:sim.pts, secs:(performance.now()-q.t0)/1000,
+               ideal:idealG, guess:num, errGrid:idealG==null?null:num-idealG, errMm:idealG==null?null:(num-idealG)*unit};
+  q.res = res; q.phase = 'result';
+  const arr = mgQLoad(); arr.push({t:Date.now(), n:q.n, key, ideal:idealG==null?null:+idealG.toFixed(3), guess:num,
+    errGrid:res.errGrid==null?null:+res.errGrid.toFixed(3), errMm:res.errMm==null?null:+res.errMm.toFixed(1), hit:res.hit, secs:+res.secs.toFixed(1)});
+  mgQSave(arr.slice(-1000));
+  mgRenderQuiz(); update();
+}
+function mgShowStats(){
+  const all = mgQLoad();
+  let box = document.getElementById('mgStatsModal');
+  if (!box){
+    box = document.createElement('div'); box.id = 'mgStatsModal'; box.className = 'modal'; box.style.display = 'none';
+    box.innerHTML = `<div class="modal-card"><div class="modal-head"><b>镜像格子 · 心算统计</b><button class="btn" id="mgStatsClose">关闭 ✕</button></div><div id="mgStatsBody"></div><div class="modal-foot"><button class="btn" id="mgStatsClear">清空记录</button></div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener('click', e=>{ if (e.target===box) box.style.display = 'none'; });
+    box.querySelector('#mgStatsClose').addEventListener('click', ()=>{ box.style.display = 'none'; });
+    box.querySelector('#mgStatsClear').addEventListener('click', ()=>{ if (window.confirm('确定清空镜像格子的测验记录？')){ mgQSave([]); mgShowStats(); } });
+  }
+  const mean = a=> a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  const rows = [1,2,3].map(n=>{
+    const rs = all.filter(r=>r.n===n), er = rs.filter(r=>r.errGrid!=null).map(r=>Math.abs(r.errGrid));
+    return {n, cnt:rs.length, hit:rs.length?rs.filter(r=>r.hit).length/rs.length:null, err:mean(er), errMm:mean(rs.filter(r=>r.errMm!=null).map(r=>Math.abs(r.errMm))), secs:mean(rs.map(r=>r.secs))};
+  });
+  let h = '<table class="stbl"><tr><th>类型</th><th>题数</th><th>命中率</th><th>平均误差</th><th>平均用时</th></tr>';
+  rows.forEach(r=>{ h += `<tr><td>${CN_N[r.n]}库</td><td>${r.cnt}</td><td>${r.hit==null?'—':Math.round(r.hit*100)+'%'}</td><td>${r.err==null?'—':gfmt2(r.err)+' 格 ('+Math.round(r.errMm)+' mm)'}</td><td>${r.secs==null?'—':r.secs.toFixed(1)+'s'}</td></tr>`; });
+  h += '</table>';
+  const cand = rows.filter(r=>r.cnt>=3).sort((a,b)=>(a.hit-b.hit) || ((b.err||0)-(a.err||0)));
+  h += cand.length ? `<div class="tip">最弱的一类：<b>${CN_N[cand[0].n]}库</b>（命中率 ${Math.round(cand[0].hit*100)}%${cand[0].err!=null?'，平均误差 '+gfmt2(cand[0].err)+' 格':''}）。</div>` : '<div class="tip">每类至少做 3 题才能指出最弱的一类。</div>';
+  document.getElementById('mgStatsBody').innerHTML = h;
+  box.style.display = 'flex';
+}
+
+/* ----- 实测修正：记录球房实测，按「库数 + 力度」算平均偏差 ----- */
+function mgRenderCal(){
+  const body = document.getElementById('mirCalBody'); if (!body) return;
+  const opt = (v,t)=>`<option value="${v}">${t}</option>`;
+  let h = '<div class="tip">修正值 = 实际碰库点 − 预测碰库点（格，沿库方向，正 = 往格数大的一侧）。默认全部为 0，没有任何内置的物理数据，<b>需要你在球房实测</b>。</div>';
+  h += '<div class="mir-grid2">' + [1,2,3].map(n=>['light','mid','heavy'].map(f=>`<label>${CN_N[n]}库 · ${FORCE_NAME[f]}<input class="mir-in" data-corr="${n}_${f}" type="number" step="0.05" value="${mgCorr(n,f)}"></label>`).join('')).join('') + '</div>';
+  h += `<div class="mir-bar">记录一次实测：<select id="mcN" class="mir-in" style="width:auto;">${[1,2,3].map(n=>opt(n,CN_N[n]+'库')).join('')}</select>
+    <select id="mcKey" class="mir-in" style="width:auto;">${Object.keys(MG_NAME).map(k=>opt(k,MG_NAME[k])).join('')}</select>
+    <select id="mcForce" class="mir-in" style="width:auto;">${['light','mid','heavy'].map(f=>opt(f,'力度 '+FORCE_NAME[f])).join('')}</select>
+    预测 <input id="mcPred" class="mir-in" style="width:5em;" type="number" step="0.05"> 实际 <input id="mcAct" class="mir-in" style="width:5em;" type="number" step="0.05">
+    <button class="btn" id="mcFill">取当前预测</button> <button class="btn primary" id="mcAdd">记录</button></div>`;
+  const groups = {};
+  mgCal.log.forEach(l=>{ const k = l.n+'_'+l.force; (groups[k] = groups[k]||[]).push(l.actual-l.pred); });
+  const keys = Object.keys(groups);
+  h += keys.length ? '<table class="stbl"><tr><th>库数 · 力度</th><th>条数</th><th>平均偏差（格）</th><th></th></tr>' + keys.map(k=>{
+    const a = groups[k], m = a.reduce((x,y)=>x+y,0)/a.length, [n,f] = k.split('_');
+    return `<tr><td>${CN_N[+n]}库 · ${FORCE_NAME[f]}</td><td>${a.length}</td><td>${gfmt2(m)}</td><td><button class="btn" data-setcorr="${k}" data-val="${m.toFixed(3)}">设为修正值</button></td></tr>`;
+  }).join('') + '</table>' : '<div class="tip">还没有实测记录。</div>';
+  h += `<div class="mir-bar"><button class="btn" id="mcClear">清空实测记录</button></div>`;
+  const keep = ['mcN','mcKey','mcForce','mcPred','mcAct'].map(id=>{ const e = document.getElementById(id); return e ? [id,e.value] : null; }).filter(Boolean);
+  body.innerHTML = h;
+  keep.forEach(([id,v])=>{ const e = document.getElementById(id); if (e) e.value = v; });      // 重绘后保留上次选的库数 / 库 / 力度
+}
+document.getElementById('mirCal').addEventListener('toggle', e=>{ if (e.target.open) mgRenderCal(); });
+document.getElementById('mirCalBody').addEventListener('input', e=>{
+  const k = e.target.dataset && e.target.dataset.corr; if (!k) return;
+  mgCal.corr[k] = parseFloat(e.target.value)||0; mgCalSave(); mgRenderSoon();
+});
+document.getElementById('mirCalBody').addEventListener('click', e=>{
+  const t = e.target, id = t.id;
+  if (t.dataset && t.dataset.setcorr){ mgCal.corr[t.dataset.setcorr] = +t.dataset.val; mgCalSave(); mgRenderCal(); mgRenderSoon(); }
+  else if (id==='mcFill'){
+    if (!mgCur){ hint('当前没有可行解'); return; }
+    const ev = mgCur, m = mgSolve(ev.seq).men.bounces[0], a = MG_ALONG(ev.seq[0]);
+    document.getElementById('mcN').value = ev.seq.length; document.getElementById('mcKey').value = ev.seq[0];
+    document.getElementById('mcPred').value = gfmt2(m.g[a]);
+  }
+  else if (id==='mcAdd'){
+    const pred = parseFloat(document.getElementById('mcPred').value), act = parseFloat(document.getElementById('mcAct').value);
+    if (!isFinite(pred) || !isFinite(act)){ hint('预测和实际格数都要填'); return; }
+    mgCal.log.push({t:Date.now(), n:+document.getElementById('mcN').value, key:document.getElementById('mcKey').value, force:document.getElementById('mcForce').value, pred, actual:act});
+    mgCal.log = mgCal.log.slice(-500); mgCalSave(); mgRenderCal(); mgRenderSoon();
+  }
+  else if (id==='mcClear'){ if (window.confirm('清空所有实测记录？（修正值不变）')){ mgCal.log = []; mgCalSave(); mgRenderCal(); mgRenderSoon(); } }
+});
+
+/* ----- 公式自检：把规格里的验证条目变成能在页面里跑的断言 ----- */
+function mgSelfTest(){
+  const out = [], near = (a,b,e=1e-9)=>Math.abs(a-b)<e, add = (name,pass,detail)=>out.push({name, pass:!!pass, detail});
+  // 1. 白球 (2,1)、目标球 (5,2)，打 y=4 库 → 3.8 格
+  const m1 = mgMental({x:2,y:1},{x:5,y:2},['bottom']);
+  add('白球(2,1) 目标(5,2) 打 y=4 库 = 3.8 格', near(m1.bounces[0].g.x,3.8) && near(m1.first.ratio,0.6), `碰库点 ${gp(m1.bounces[0].g)}，比例 ${m1.first.ratio}`);
+  // 2. 两球离同一库一样远 → 正中间
+  const m2 = mgMental({x:1,y:1},{x:4,y:1},['bottom']);
+  add('两球离同一库一样远：碰库点在正中间', near(m2.bounces[0].g.x,2.5), `碰库点 x=${gfmt2(m2.bounces[0].g.x)}（两球 x=1 和 4，中点 2.5）`);
+  // 3. 相邻二库：出射方向与入射方向平行
+  const m3 = mgMental({x:2,y:1},{x:5,y:2},['bottom','right']), un3 = mgUnfold({x:5,y:2},['bottom','right']);
+  const dIn = {x:un3.T.x-2, y:un3.T.y-1}, last3 = m3.bounces[1].g, dOut = {x:5-last3.x, y:2-last3.y};
+  add('相邻二库：出射方向与入射方向平行', near(dIn.x*dOut.y-dIn.y*dOut.x,0,1e-9) && (dIn.x*dOut.x+dIn.y*dOut.y)<0, `叉积 ${(dIn.x*dOut.y-dIn.y*dOut.x).toExponential(1)}，方向相反（反向平行）`);
+  // 4. 三库 y=4 → x=8 → y=0：镜像 = (16−x, 8+y)，且和直线展开一致
+  const tgt = {x:5,y:2}, un4 = mgUnfold(tgt,['bottom','right','top']);
+  const m4 = mgMental({x:2,y:1}, tgt, ['bottom','right','top']);
+  let dir = {x:un4.T.x-2, y:un4.T.y-1}; m4.bounces.forEach(b=>{ dir = MG_FACE[b.key].axis==='y' ? {x:dir.x,y:-dir.y} : {x:-dir.x,y:dir.y}; });
+  const lastB = m4.bounces[2].g, cr = dir.x*(tgt.y-lastB.y)-dir.y*(tgt.x-lastB.x);
+  add('三库 y=4→x=8→y=0：镜像 = (16−x, 8+y)，路线与直线展开一致', near(un4.T.x,11) && near(un4.T.y,10) && near(cr,0,1e-9), `镜像 ${gp(un4.T)}（期望 (11.0, 10.0)），末段与目标叉积 ${cr.toExponential(1)}`);
+  // 5. 精确值与心算值的差：用手算公式独立核对
+  const save = {cue:{...S.cue}, obj:{...S.obj}, blk:{...S.blk}};
+  S.cue = {x:2*GX-L/2, y:1*GY-W/2}; S.obj = {x:5*GX-L/2, y:2*GY-W/2}; S.blk = {x:-L, y:-W};
+  const sol = mgSolve(['bottom']);
+  const vb = W/2-R, Ty = 2*vb-S.obj.y, tt = (vb-S.cue.y)/(Ty-S.cue.y), exX = (S.cue.x+(S.obj.x-S.cue.x)*tt+L/2)/GX;
+  add('精确值与心算值的差显示正确', near(sol.ex.bounces[0].g.x, exX, 1e-9) && near(sol.diffs[0].dGrid, exX-3.8, 1e-9), `精确 ${gfmt2(exX)} 格，心算 3.80 格，差 ${gfmt2(exX-3.8)} 格 (${Math.round((exX-3.8)*GX)} mm)`);
+  // 6. 正向模拟（simulateKick）与展开直线的碰库点一致（精确值）
+  const ev = mgEval(['bottom']);
+  add('正向模拟的碰库点 = 精确展开值', ev.ok && near(gridOf(ev.pts[1]).x, exX, 1e-6), ev.ok ? `模拟 ${gfmt2(gridOf(ev.pts[1]).x)} 格 vs 展开 ${gfmt2(exX)} 格` : '该球形没有直线解');
+  S.cue = save.cue; S.obj = save.obj; S.blk = save.blk;
+  return out;
+}
+document.getElementById('mirTest').addEventListener('toggle', e=>{
+  if (!e.target.open) return;
+  const rs = mgSelfTest();
+  document.getElementById('mgTestOut').innerHTML = rs.map(r=>`<div class="st"><b class="${r.pass?'ok':'bad'}">${r.pass?'✓':'✗'}</b> ${r.name}<br><span style="color:var(--muted);font-size:12px;">${r.detail}</span></div>`).join('');
+});
 
 /* ================= 加塞几何分析 ================= */
 /* 只放能由力学 / 几何严格推出的东西：
@@ -2382,7 +2994,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v24');
+    add('版本缓存', 'v25');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
@@ -2431,24 +3043,26 @@ document.getElementById('segMode').addEventListener('click', e=>{
   b.classList.add('on');
   const prev = S.mode;
   S.mode = b.dataset.m;
-  const rnd = S.mode==='random', qz = S.mode==='quiz', esc = S.mode==='escape', pad = S.mode==='pad';
+  const rnd = S.mode==='random', qz = S.mode==='quiz', esc = S.mode==='escape', pad = S.mode==='pad', mir = S.mode==='mirror';
+  if (prev==='mirror' && !mir) mgLeave();
   document.getElementById('selDiff').style.display = (rnd||qz)?'':'none';
-  document.getElementById('btnNext').style.display = (rnd||qz||esc)?'':'none';
+  document.getElementById('btnNext').style.display = (rnd||qz||esc||mir)?'':'none';
   document.getElementById('btnNext').textContent = qz ? '跳过 ⏭' : '换一题 ⟳';
-  document.getElementById('btnAnswer').style.display = (qz||pad) ? 'none' : '';
+  document.getElementById('btnAnswer').style.display = (qz||pad||mir) ? 'none' : '';
   document.getElementById('quizBar').style.display = qz ? '' : 'none';
-  document.getElementById('engSec').style.display = (qz||esc||pad) ? 'none' : '';
-  ['.aim-ctl','#btnFan'].forEach(q=> document.querySelector(q).style.display = (qz||esc||pad) ? 'none' : '');   // 测验 / 解斯诺克 / 白球线路里不需要
-  document.getElementById('selCue').style.display = (qz||esc) ? 'none' : '';
-  document.getElementById('routeCtl').style.display = (qz||pad) ? 'none' : '';
+  document.getElementById('engSec').style.display = (qz||esc||pad||mir) ? 'none' : '';
+  document.getElementById('mirPanel').style.display = mir ? '' : 'none';
+  ['.aim-ctl','#btnFan'].forEach(q=> document.querySelector(q).style.display = (qz||esc||pad||mir) ? 'none' : '');   // 测验 / 解斯诺克 / 白球线路里不需要
+  document.getElementById('selCue').style.display = (qz||esc||mir) ? 'none' : '';
+  document.getElementById('routeCtl').style.display = (qz||pad||mir) ? 'none' : '';
   const cop = document.getElementById('selCue').options;
   ['白球走位：不显示','白球走位：1 库','白球走位：2 库','白球走位：3 库'].forEach((t,i)=>{ cop[i].textContent = pad ? ['出杆线：不碰库','白球走 1 库','白球走 2 库','白球走 3 库'][i] : t; });
-  document.getElementById('cueNote').style.display = qz ? 'none' : '';
+  document.getElementById('cueNote').style.display = (qz||mir) ? 'none' : '';
   /* 线路下拉框的文字随模式变 */
   const opts = document.getElementById('selRoute').options;
   opts[0].textContent = esc ? '直接击球' : '直接进袋';
   for (let i=1;i<=3;i++) opts[i].textContent = esc ? `白球走 ${i} 库` : `借 ${i} 库`;
-  if (prev==='escape' || esc){ S.banks = []; }
+  if (prev==='escape' || esc || prev==='mirror' || mir){ S.banks = []; }
   syncNudge();
   if (qz){ startQuiz(); return; }
   if (Q.on){                       // 离开测验：恢复显示答案
@@ -2463,6 +3077,12 @@ document.getElementById('segMode').addEventListener('click', e=>{
     update(); followCam();
     return;
   }
+  if (mir){
+    S.showAnswer = true;
+    hint('镜像格子：库边像镜子，把目标球翻到镜子另一边，白球对准镜像打直线。拖球 / 点库边选解法 · ‹ › 切换');
+    mgEnter();
+    return;
+  }
   if (esc){
     hint('解斯诺克：目标球被障碍球（粉）挡住，选「白球走 1/2/3 库」看能打到目标球的线路 · ‹ › 切换 · 可拖球');
     randomEscape();
@@ -2471,7 +3091,7 @@ document.getElementById('segMode').addEventListener('click', e=>{
   hint(rnd?'点「换一题」换新球形 · ← → 或按钮移动白球':'拖动白球 / 红球 · ← → 微调白球 · 点袋口选目标袋 · 点库边设置借库');
   if (rnd) randomLayout(); else update();
 });
-document.getElementById('btnNext').addEventListener('click', ()=>{ if (S.mode==='quiz') newQuestion(); else if (S.mode==='escape') randomEscape(); else randomLayout(); });
+document.getElementById('btnNext').addEventListener('click', ()=>{ if (S.mode==='quiz') newQuestion(); else if (S.mode==='escape') randomEscape(); else if (S.mode==='mirror') mgRandom(); else randomLayout(); });
 document.getElementById('btnAnswer').addEventListener('click', function(){
   S.showAnswer = !S.showAnswer;
   this.textContent = S.showAnswer?'隐藏答案 👁':'显示答案 👁';
