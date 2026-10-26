@@ -2195,8 +2195,10 @@ function updatePad3D(){
     return (90-ang*180/Math.PI);
   })() : null;
   const seq = pp.sides.map(k=>SIDE_SHORT[k]).join('→');
+  /* 台边数字：每个碰库点在库边刻度上的位置（格，格线在库边面上；y=0 库在绿球点一侧） */
+  const gc0 = gridOf(c), where = pp.hitPts.map((p,i)=>{ const k = pp.sides[i], a = MG_ALONG(k); return `${'①②③'[i]} ${MG_SHORT[k]}库 ${a}=${gfmt(gridOf(p)[a])}`; }).join('，');
   document.getElementById('cueNote').textContent =
-    `白球线路（理想·无旋转）：${pp.sides.length ? '依次碰 '+seq : '直线出杆，不碰库'}` +
+    `白球线路（理想·无旋转）：白球 ${gp(gc0)} 格；${pp.sides.length ? '依次碰 '+seq+'（'+where+'）' : '直线出杆，不碰库'}` +
     (inc!=null ? ` · 第 1 库入射角 ${inc.toFixed(1)}°（与库边夹角）` : '') +
     ` · 路程 ${(pp.len/1000).toFixed(2)} m` +
     (pp.risk ? ' · ⚠ 路线撞向袋口（可能落袋）' : (pp.next ? `；若继续，下一库是 ${SIDE_SHORT[pp.next]}` : '')) +
@@ -2513,7 +2515,7 @@ function mirrorStats(){
     updateOverlap(cur.cut, cross>0 ? 1 : -1);
   }
 }
-function updateGridMarks(){ if (gridMarks3) gridMarks3.visible = (S.mode==='mirror' || S.showGrid); }
+function updateGridMarks(){ if (gridMarks3) gridMarks3.visible = (S.mode==='mirror' || S.mode==='pad' || S.showGrid); }
 
 /* ----- 镜子台（镜像视图）：球心可到达区域（库面内缩 R）依次对各库翻出的拷贝 ----- */
 function mgCorners(){ return [{x:-L/2+R,y:-W/2+R},{x:L/2-R,y:-W/2+R},{x:L/2-R,y:W/2-R},{x:-L/2+R,y:W/2-R}]; }
@@ -2994,7 +2996,7 @@ engMu.addEventListener('input', ()=>{ S.eng.mu = Math.max(0, Math.min(0.2, +engM
     lines = [];
     const add = (k,v)=> lines.push(k+'：'+v);
     add('时间', new Date().toLocaleString());
-    add('版本缓存', 'v25');
+    add('版本缓存', 'v26');
     add('UA', navigator.userAgent);
     add('屏幕', `${screen.width}×${screen.height}  视口 ${innerWidth}×${innerHeight}  DPR ${devicePixelRatio}`);
     add('触控点数', navigator.maxTouchPoints+'  pointer:coarse='+matchMedia('(pointer:coarse)').matches);
